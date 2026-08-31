@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: goravel_dbos_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d goravel_dbos_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      GORAVEL_DBOS_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/goravel_dbos_test?sslmode=disable
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        run: make format-check
+
+      - name: Build
+        run: make build
+
+      - name: Vet
+        run: make vet
+
+      - name: Test with PostgreSQL
+        run: make test
+
+      - name: Race test with PostgreSQL
+        run: make race
