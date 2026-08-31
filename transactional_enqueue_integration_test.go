@@ -3,6 +3,7 @@ package goraveldbos
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -12,9 +13,18 @@ import (
 
 	dbossdk "github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/google/uuid"
+	"github.com/goravel/framework/contracts/binding"
+	contractsdatabase "github.com/goravel/framework/contracts/database"
+	contractsorm "github.com/goravel/framework/contracts/database/orm"
+	databasegorm "github.com/goravel/framework/database/gorm"
+	databaseorm "github.com/goravel/framework/database/orm"
+	"github.com/goravel/framework/facades"
+	frameworkfoundation "github.com/goravel/framework/foundation"
 	mocksfoundation "github.com/goravel/framework/mocks/foundation"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
+	gormpostgres "gorm.io/driver/postgres"
+	gormio "gorm.io/gorm"
 )
 
 type sqliteTransactionScanner struct{ tx *sql.Tx }
@@ -165,6 +175,134 @@ func TestPostgresTransactionalEnqueueCommitAndRollback(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestPostgresTransactionalEnqueueThroughGoravelORM(t *testing.T) {
+	databaseURL := strings.TrimSpace(os.Getenv(integrationDatabaseEnvironment))
+	if databaseURL == "" {
+		t.Skipf("set %s to run the PostgreSQL integration test", integrationDatabaseEnvironment)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
+	dbosSchema := "goravel_dbos_orm_" + suffix
+	appSchema := "goravel_dbos_app_" + suffix
+	appTable := pgx.Identifier{appSchema, "events"}.Sanitize()
+
+	admin, err := pgx.Connect(ctx, databaseURL)
+	require.NoError(t, err)
+	require.NoError(t, func() error {
+		_, execErr := admin.Exec(ctx, "CREATE SCHEMA "+pgx.Identifier{appSchema}.Sanitize())
+		return execErr
+	}())
+	_, err = admin.Exec(ctx, "CREATE TABLE "+appTable+" (id text PRIMARY KEY)")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		_, _ = admin.Exec(cleanupContext, "DROP SCHEMA IF EXISTS "+pgx.Identifier{dbosSchema}.Sanitize()+" CASCADE")
+		_, _ = admin.Exec(cleanupContext, "DROP SCHEMA IF EXISTS "+pgx.Identifier{appSchema}.Sanitize()+" CASCADE")
+		_ = admin.Close(cleanupContext)
+	})
+
+	runtimeApp := mocksfoundation.NewApplication(t)
+	runtimeApp.EXPECT().Context().Return(ctx).Maybe()
+	runtimeApp.EXPECT().MakeLog().Return(nil).Maybe()
+	runtime := &Runtime{app: runtimeApp, config: Config{
+		Role:                     RoleProducer,
+		AppName:                  "goravel-dbos-orm-integration",
+		ApplicationVersion:       "integration-v1",
+		DatabaseConnection:       "primary",
+		DatabaseDriver:           "postgres",
+		DatabaseURL:              databaseURL,
+		DatabaseSchema:           dbosSchema,
+		PoolMaxConns:             5,
+		PoolMinConns:             0,
+		PoolMaxConnLifetime:      time.Hour,
+		PoolMaxConnIdleTime:      5 * time.Minute,
+		PoolConnectTimeout:       10 * time.Second,
+		LogLevel:                 "error",
+		StartupTimeout:           30 * time.Second,
+		ShutdownTimeout:          10 * time.Second,
+		SchedulerPollingInterval: 30 * time.Second,
+	}}
+	require.NoError(t, runtime.Prepare(), "producer preparation must initialize a fresh DBOS schema")
+	require.NoError(t, runtime.Prepare(), "producer preparation must be idempotent")
+	t.Cleanup(func() { require.NoError(t, runtime.Shutdown()) })
+
+	gormDB, err := gormio.Open(gormpostgres.Open(databaseURL), &gormio.Config{SkipDefaultTransaction: true})
+	require.NoError(t, err)
+	sqlDB, err := gormDB.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	databaseConfig := contractsdatabase.Config{Connection: "primary", Driver: "postgres"}
+	query := databasegorm.NewQuery(ctx, nil, databaseConfig, gormDB, nil, nil, nil, nil, nil)
+	ormService := databaseorm.NewOrm(
+		ctx,
+		nil,
+		"primary",
+		databaseConfig,
+		query,
+		map[string]contractsorm.Query{"primary": query},
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	frameworkfoundation.NewApplication().Instance(binding.Orm, ormService)
+
+	definition := Define[map[string]string, struct{}]("integration.goravel-orm.v1", "integration")
+	commitID := "goravel-orm-commit-" + suffix
+	err = facades.Orm().WithContext(ctx).Transaction(func(tx contractsorm.Query) error {
+		if _, execErr := tx.Exec("INSERT INTO "+appTable+" (id) VALUES (?)", "committed"); execErr != nil {
+			return execErr
+		}
+		_, enqueueErr := EnqueueInTransaction(
+			runtime,
+			tx,
+			definition,
+			map[string]string{"event": "committed"},
+			WithTransactionWorkflowID(commitID),
+		)
+		return enqueueErr
+	})
+	require.NoError(t, err)
+
+	rollbackID := "goravel-orm-rollback-" + suffix
+	rollbackCause := errors.New("force rollback")
+	err = facades.Orm().WithContext(ctx).Transaction(func(tx contractsorm.Query) error {
+		if _, execErr := tx.Exec("INSERT INTO "+appTable+" (id) VALUES (?)", "rolled-back"); execErr != nil {
+			return execErr
+		}
+		if _, enqueueErr := EnqueueInTransaction(
+			runtime,
+			tx,
+			definition,
+			map[string]string{"event": "rolled-back"},
+			WithTransactionWorkflowID(rollbackID),
+		); enqueueErr != nil {
+			return enqueueErr
+		}
+		return rollbackCause
+	})
+	require.ErrorIs(t, err, rollbackCause)
+
+	var committedRows, rolledBackRows int
+	require.NoError(t, admin.QueryRow(ctx, "SELECT count(*) FROM "+appTable+" WHERE id = 'committed'").Scan(&committedRows))
+	require.NoError(t, admin.QueryRow(ctx, "SELECT count(*) FROM "+appTable+" WHERE id = 'rolled-back'").Scan(&rolledBackRows))
+	require.Equal(t, 1, committedRows)
+	require.Zero(t, rolledBackRows)
+
+	client, err := runtime.Client()
+	require.NoError(t, err)
+	committedWorkflow, err := dbossdk.RetrieveWorkflow[any](client, commitID)
+	require.NoError(t, err)
+	status, err := committedWorkflow.GetStatus()
+	require.NoError(t, err)
+	require.Equal(t, dbossdk.WorkflowStatusEnqueued, status.Status)
+	_, err = dbossdk.RetrieveWorkflow[any](client, rollbackID)
+	require.Error(t, err)
+}
+
 func TestPostgresProducerWorkerRuntimeLifecycle(t *testing.T) {
 	databaseURL := strings.TrimSpace(os.Getenv(integrationDatabaseEnvironment))
 	if databaseURL == "" {
@@ -190,6 +328,11 @@ func TestPostgresProducerWorkerRuntimeLifecycle(t *testing.T) {
 		DatabaseDriver:           "postgres",
 		DatabaseURL:              databaseURL,
 		DatabaseSchema:           schema,
+		PoolMaxConns:             10,
+		PoolMinConns:             0,
+		PoolMaxConnLifetime:      time.Hour,
+		PoolMaxConnIdleTime:      5 * time.Minute,
+		PoolConnectTimeout:       10 * time.Second,
 		LogLevel:                 "error",
 		StartupTimeout:           30 * time.Second,
 		ShutdownTimeout:          10 * time.Second,

@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 )
 
@@ -78,7 +79,32 @@ func TestLoadConfigBuildsEscapedNativePostgresURL(t *testing.T) {
 	require.Equal(t, RoleProducer, cfg.Role)
 	require.Equal(t, "primary", cfg.DatabaseConnection)
 	require.Equal(t, "postgresql://app%20user:p%40ss%2Fword@db.internal:5433/billing%20data?search_path=tenant&sslmode=require&timezone=Europe%2FPrague", cfg.DatabaseURL)
+	require.Equal(t, int32(20), cfg.PoolMaxConns)
+	require.Equal(t, int32(0), cfg.PoolMinConns)
 	require.True(t, cfg.DisableGoravelRunners)
+}
+
+func TestLoadConfigBuildsNativePostgresUnixSocketURL(t *testing.T) {
+	input := validConfig()
+	input["database.connections.primary.host"] = "/run/postgresql"
+	input["database.connections.primary.port"] = "not-used-for-sockets"
+
+	cfg, err := loadConfig(input, "postgres")
+	require.NoError(t, err)
+	require.Equal(t, "postgresql://app%20user:p%40ss%2Fword@/billing%20data?host=%2Frun%2Fpostgresql&search_path=tenant&sslmode=require&timezone=Europe%2FPrague", cfg.DatabaseURL)
+	poolConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	require.NoError(t, err)
+	require.Equal(t, "/run/postgresql", poolConfig.ConnConfig.Host)
+	require.Equal(t, uint16(5432), poolConfig.ConnConfig.Port)
+}
+
+func TestLoadConfigValidatesDBOSPoolBudget(t *testing.T) {
+	input := validConfig()
+	input["dbos.pool.max_conns"] = 5
+	input["dbos.pool.min_conns"] = 6
+
+	_, err := loadConfig(input, "postgres")
+	require.ErrorContains(t, err, "min_conns")
 }
 
 func TestLoadConfigRequiresVersionInProduction(t *testing.T) {

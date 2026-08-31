@@ -39,7 +39,7 @@ func (p *ServiceProvider) Register(app contractsfoundation.Application) {
 }
 
 func (p *ServiceProvider) Boot(app contractsfoundation.Application) {
-	app.Commands([]commands.Command{commands.NewDoctor(app)})
+	app.Commands([]commands.Command{commands.NewDoctor(app), commands.NewMigrate(app)})
 	app.Publishes(PackageName, map[string]string{
 		"setup/config/dbos.go": app.ConfigPath("dbos.go"),
 	}, "goravel-dbos")

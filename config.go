@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -46,6 +47,11 @@ type Config struct {
 	DatabaseDriver           string
 	DatabaseURL              string
 	DatabaseSchema           string
+	PoolMaxConns             int32
+	PoolMinConns             int32
+	PoolMaxConnLifetime      time.Duration
+	PoolMaxConnIdleTime      time.Duration
+	PoolConnectTimeout       time.Duration
 	ExecutorID               string
 	ConductorURL             string
 	ConductorAPIKey          string
@@ -80,6 +86,11 @@ func loadConfig(config configReader, databaseDriver ...string) (Config, error) {
 		DatabaseConnection:       strings.TrimSpace(config.GetString("database.default")),
 		DatabaseDriver:           strings.ToLower(strings.TrimSpace(firstString(databaseDriver))),
 		DatabaseSchema:           strings.TrimSpace(config.GetString("dbos.schema", "dbos")),
+		PoolMaxConns:             int32(config.GetInt("dbos.pool.max_conns", 20)),
+		PoolMinConns:             int32(config.GetInt("dbos.pool.min_conns", 0)),
+		PoolMaxConnLifetime:      seconds(config.GetInt("dbos.pool.max_conn_lifetime_seconds", 3600)),
+		PoolMaxConnIdleTime:      seconds(config.GetInt("dbos.pool.max_conn_idle_time_seconds", 300)),
+		PoolConnectTimeout:       seconds(config.GetInt("dbos.pool.connect_timeout_seconds", 10)),
 		ExecutorID:               strings.TrimSpace(config.GetString("dbos.executor_id")),
 		ConductorURL:             strings.TrimSpace(config.GetString("dbos.conductor.url")),
 		ConductorAPIKey:          strings.TrimSpace(config.GetString("dbos.conductor.api_key")),
@@ -158,6 +169,12 @@ func validateConfig(config configReader, cfg *Config) error {
 	if cfg.LogLevel != "debug" && cfg.LogLevel != "info" && cfg.LogLevel != "warn" && cfg.LogLevel != "error" {
 		return fmt.Errorf("goravel-dbos: invalid log level %q", cfg.LogLevel)
 	}
+	if cfg.PoolMaxConns < 1 || cfg.PoolMinConns < 0 || cfg.PoolMinConns > cfg.PoolMaxConns {
+		return errors.New("goravel-dbos: dbos.pool.max_conns must be positive and min_conns must be between zero and max_conns")
+	}
+	if cfg.PoolMaxConnLifetime <= 0 || cfg.PoolMaxConnIdleTime <= 0 || cfg.PoolConnectTimeout <= 0 {
+		return errors.New("goravel-dbos: DBOS pool lifetime, idle time and connect timeout must be positive")
+	}
 
 	if cfg.DatabaseConnection == "" {
 		return errors.New("goravel-dbos: database.default must select a PostgreSQL or SQLite connection")
@@ -221,17 +238,22 @@ func postgresURLFromGoravel(config configReader, connection string) (string, err
 	if host == "" || database == "" || username == "" {
 		return "", fmt.Errorf("goravel-dbos: database.default connection %q must be PostgreSQL and define host, database and username", connection)
 	}
-	portNumber, err := strconv.Atoi(port)
-	if err != nil || portNumber < 1 || portNumber > 65535 {
-		return "", fmt.Errorf("goravel-dbos: invalid PostgreSQL port %q", port)
+	u := &url.URL{Scheme: "postgresql", Path: "/" + database}
+	query := url.Values{}
+	if filepath.IsAbs(host) {
+		query.Set("host", host)
+	} else {
+		portNumber, err := strconv.Atoi(port)
+		if err != nil || portNumber < 1 || portNumber > 65535 {
+			return "", fmt.Errorf("goravel-dbos: invalid PostgreSQL port %q", port)
+		}
+		u.Host = net.JoinHostPort(host, port)
 	}
-	u := &url.URL{Scheme: "postgresql", Host: net.JoinHostPort(host, port), Path: "/" + database}
 	if password == "" {
 		u.User = url.User(username)
 	} else {
 		u.User = url.UserPassword(username, password)
 	}
-	query := url.Values{}
 	query.Set("sslmode", sslmode)
 	query.Set("timezone", timezone)
 	query.Set("search_path", searchPath)

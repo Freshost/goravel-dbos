@@ -66,11 +66,29 @@ It does not modify consuming application code, move existing workflow
 implementations or create application database migrations. Each application
 adopts the package and migrates its own integration independently.
 
+### Prepare the DBOS system schema
+
+Run the package-owned migration command as an explicit release step after the
+application configuration is available and before producers or workers accept
+traffic:
+
+```shell
+./artisan dbos:migrate
+```
+
+The command initializes or upgrades only the internal schema owned by the DBOS
+SDK and then closes its migration client. It never runs or publishes migrations
+owned by the consuming application. Active package runners also call the
+idempotent `Runtime.Prepare()` on startup for fail-fast connectivity, but
+Goravel runners start concurrently; startup preparation is defense in depth,
+not a replacement for the explicit deployment step when using
+`EnqueueInTransaction`.
+
 ## Process roles
 
 | Role | Behavior |
 | --- | --- |
-| `producer` | Opens a DBOS Client when needed; on SQLite also runs the internal dispatch relay. Executes no workflows. |
+| `producer` | Initializes a DBOS Client at process start; on SQLite also runs the internal dispatch relay. Executes no workflows. |
 | `worker` | Registers and launches DBOS; disables standard Goravel server/scheduler/queue runners. |
 | `embedded` | Launches DBOS alongside the application's other runners. |
 | `disabled` | Does not connect to DBOS. |
@@ -153,9 +171,26 @@ package configuration.
 
 The selected `database.default` connection must use PostgreSQL, or file-backed
 SQLite with `dbos.sqlite.experimental=true`. For PostgreSQL, both normal Goravel
-connection fields and native `dsn` are supported. For experimental SQLite, the
-package reuses `dsn` or `database`. A disabled DBOS runtime does not require a
-database connection.
+connection fields and native `dsn` are supported, including a Unix socket path
+such as `/run/postgresql` in the native `host` field. For experimental SQLite,
+the package reuses `dsn` or `database`. A disabled DBOS runtime does not require
+a database connection.
+
+DBOS needs its own PostgreSQL pool even though it reuses the native Goravel DSN
+and database. Tune that connection budget directly in `config/dbos.go`; these
+defaults match DBOS Go 1.0:
+
+```go
+"pool": map[string]any{
+    "max_conns":                   20,
+    "min_conns":                   0,
+    "max_conn_lifetime_seconds":  3600,
+    "max_conn_idle_time_seconds": 300,
+    "connect_timeout_seconds":    10,
+},
+```
+
+These settings do not permit separate DBOS credentials or a separate database.
 
 Check configuration, schema migration and connectivity without exposing the
 database URL:
@@ -163,6 +198,15 @@ database URL:
 ```shell
 ./artisan dbos:doctor
 ```
+
+Creating a DBOS Client may apply pending SDK-owned migrations. Use
+`dbos:migrate` as the explicit release operation instead of relying on
+`dbos:doctor` for deployment ordering.
+
+For a worker-local liveness probe, enable the DBOS admin server and probe
+`GET /dbos-healthz` on its configured port. This confirms the local executor;
+end-to-end queue consumption still requires backlog monitoring or a synthetic
+workflow and is intentionally not inferred from a producer's health endpoint.
 
 The DBOS SDK owns its internal system storage. On SQLite, this package also owns
 and automatically versions `goravel_dbos_package_migrations` and

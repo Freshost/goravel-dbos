@@ -11,6 +11,7 @@ import (
 	dbossdk "github.com/dbos-inc/dbos-transact-golang/dbos"
 	_ "github.com/dbos-inc/dbos-transact-golang/dbos/driver/sqlite"
 	contractsfoundation "github.com/goravel/framework/contracts/foundation"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	packagecontracts "github.com/freshost/goravel-dbos/contracts"
 )
@@ -73,6 +74,18 @@ func (r *Runtime) DatabaseConnection() string { return r.config.DatabaseConnecti
 func (r *Runtime) DatabaseDriver() string     { return r.config.DatabaseDriver }
 func (r *Runtime) DatabaseSchema() string     { return r.config.DatabaseSchema }
 
+// Prepare initializes the DBOS system database and applies SDK-owned schema
+// migrations without launching workflow execution. It is safe to call more
+// than once. Applications should run dbos:migrate as an explicit deployment
+// step before processes that use transaction-bound enqueue accept traffic.
+func (r *Runtime) Prepare() error {
+	_, err := r.Client()
+	if err != nil {
+		return fmt.Errorf("goravel-dbos: prepare system database: %w", err)
+	}
+	return nil
+}
+
 // AddRegistrar adds application-owned workflow registration. It is safe during
 // Goravel provider Boot and rejected after executor startup begins.
 func (r *Runtime) AddRegistrar(registrar Registrar) error {
@@ -116,12 +129,7 @@ func (r *Runtime) Client() (dbossdk.Client, error) {
 		r.executor = executor
 		return executor, nil
 	}
-	client, err := dbossdk.NewClient(r.app.Context(), dbossdk.ClientConfig{
-		DatabaseURL:            r.config.DatabaseURL,
-		DatabaseSchema:         r.config.DatabaseSchema,
-		Logger:                 newDBOSLogger(r.app.MakeLog(), r.config.LogLevel),
-		SystemDBStartupTimeout: r.config.StartupTimeout,
-	})
+	client, err := r.newClient()
 	if err != nil {
 		return nil, fmt.Errorf("goravel-dbos: initialize producer client: %w", err)
 	}
@@ -194,9 +202,14 @@ func (r *Runtime) Start() error {
 }
 
 func (r *Runtime) newExecutor() (dbossdk.Context, error) {
+	databaseURL, systemDBPool, err := r.databaseInputs()
+	if err != nil {
+		return nil, err
+	}
 	ctx, err := dbossdk.NewContext(r.app.Context(), dbossdk.Config{
 		AppName:                  r.config.AppName,
-		DatabaseURL:              r.config.DatabaseURL,
+		DatabaseURL:              databaseURL,
+		SystemDBPool:             systemDBPool,
 		DatabaseSchema:           r.config.DatabaseSchema,
 		Logger:                   newDBOSLogger(r.app.MakeLog(), r.config.LogLevel),
 		ConductorURL:             r.config.ConductorURL,
@@ -210,9 +223,57 @@ func (r *Runtime) newExecutor() (dbossdk.Context, error) {
 		AdminServerPort:          r.config.AdminServerPort,
 	})
 	if err != nil {
+		if systemDBPool != nil {
+			systemDBPool.Close()
+		}
 		return nil, fmt.Errorf("goravel-dbos: initialize executor: %w", err)
 	}
 	return ctx, nil
+}
+
+func (r *Runtime) newClient() (dbossdk.Client, error) {
+	databaseURL, systemDBPool, err := r.databaseInputs()
+	if err != nil {
+		return nil, err
+	}
+	client, err := dbossdk.NewClient(r.app.Context(), dbossdk.ClientConfig{
+		DatabaseURL:            databaseURL,
+		SystemDBPool:           systemDBPool,
+		DatabaseSchema:         r.config.DatabaseSchema,
+		Logger:                 newDBOSLogger(r.app.MakeLog(), r.config.LogLevel),
+		SystemDBStartupTimeout: r.config.StartupTimeout,
+	})
+	if err != nil {
+		if systemDBPool != nil {
+			systemDBPool.Close()
+		}
+		return nil, err
+	}
+	return client, nil
+}
+
+func (r *Runtime) databaseInputs() (string, *pgxpool.Pool, error) {
+	if r.config.DatabaseDriver != "postgres" {
+		return r.config.DatabaseURL, nil, nil
+	}
+	poolConfig, err := pgxpool.ParseConfig(r.config.DatabaseURL)
+	if err != nil {
+		return "", nil, fmt.Errorf("goravel-dbos: parse native PostgreSQL connection: %w", err)
+	}
+	poolConfig.MaxConns = r.config.PoolMaxConns
+	poolConfig.MinConns = r.config.PoolMinConns
+	poolConfig.MaxConnLifetime = r.config.PoolMaxConnLifetime
+	poolConfig.MaxConnIdleTime = r.config.PoolMaxConnIdleTime
+	poolConfig.ConnConfig.ConnectTimeout = r.config.PoolConnectTimeout
+	if poolConfig.ConnConfig.RuntimeParams == nil {
+		poolConfig.ConnConfig.RuntimeParams = make(map[string]string)
+	}
+	poolConfig.ConnConfig.RuntimeParams["application_name"] = r.config.AppName
+	pool, err := pgxpool.NewWithConfig(r.app.Context(), poolConfig)
+	if err != nil {
+		return "", nil, fmt.Errorf("goravel-dbos: create DBOS PostgreSQL pool: %w", err)
+	}
+	return "", pool, nil
 }
 
 func (r *Runtime) closeFailedExecutor(ctx dbossdk.Context) {

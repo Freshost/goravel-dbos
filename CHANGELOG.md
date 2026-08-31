@@ -8,6 +8,22 @@ While the package is pre-1.0, minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-31
+
+### Added
+
+- Idempotent `Runtime.Prepare` and explicit `dbos:migrate` for DBOS SDK-owned
+  system-schema preparation before producers accept transactional traffic.
+- Native DBOS PostgreSQL pool tuning while retaining Goravel's
+  `database.default` DSN and credentials.
+- Real Goravel `facades.Orm()` PostgreSQL commit/rollback integration coverage.
+
+### Fixed
+
+- Producer startup now initializes the DBOS Client instead of leaving the first
+  transaction-bound enqueue exposed to a missing-schema race.
+- Native PostgreSQL connection derivation now supports Unix socket directories.
+
 ## [0.1.0] - 2026-08-31
 
 ### Added

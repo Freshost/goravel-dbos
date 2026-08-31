@@ -25,6 +25,9 @@ func (r *runner) Run() error {
 	if err != nil {
 		return err
 	}
+	if err := runtime.Prepare(); err != nil {
+		return fmt.Errorf("prepare DBOS system database: %w", err)
+	}
 	if runtime.Role() == RoleWorker || runtime.Role() == RoleEmbedded {
 		if err := runtime.Start(); err != nil {
 			return fmt.Errorf("start DBOS runtime: %w", err)

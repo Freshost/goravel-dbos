@@ -15,7 +15,17 @@ func init() {
 		// DBOS always reuses database.default and its native Goravel connection
 		// settings. PostgreSQL is production-supported; SQLite is experimental.
 		// There is intentionally no separate DBOS database.
-		"schema":                             config.Env("DBOS_SCHEMA", "dbos"),
+		"schema": config.Env("DBOS_SCHEMA", "dbos"),
+		"pool": map[string]any{
+			// DBOS uses its own pgx pool over the same database.default DSN.
+			// These defaults match DBOS Go 1.0 while allowing applications to
+			// enforce their PostgreSQL connection budget in native Goravel config.
+			"max_conns":                  20,
+			"min_conns":                  0,
+			"max_conn_lifetime_seconds":  3600,
+			"max_conn_idle_time_seconds": 300,
+			"connect_timeout_seconds":    10,
+		},
 		"executor_id":                        config.Env("DBOS_EXECUTOR_ID", ""),
 		"log_level":                          config.Env("DBOS_LOG_LEVEL", "info"),
 		"startup_timeout_seconds":            config.Env("DBOS_STARTUP_TIMEOUT_SECONDS", 120),

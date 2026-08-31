@@ -3,6 +3,7 @@ package goraveldbos
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -171,30 +172,75 @@ func TestRuntimeDisabledOperations(t *testing.T) {
 	require.Error(t, runtime.AddRegistrar(RegistrarFunc(func(*Registry) error { return nil })))
 }
 
+func TestRuntimeBuildsOwnedPostgresPoolFromNativeConnection(t *testing.T) {
+	app := mocksfoundation.NewApplication(t)
+	app.EXPECT().Context().Return(context.Background()).Once()
+	runtime := &Runtime{app: app, config: Config{
+		AppName:             "billing",
+		DatabaseDriver:      "postgres",
+		DatabaseURL:         "postgresql://app:secret@db.internal:5432/billing?sslmode=require",
+		PoolMaxConns:        10,
+		PoolMinConns:        5,
+		PoolMaxConnLifetime: 2 * time.Hour,
+		PoolMaxConnIdleTime: 2 * time.Minute,
+		PoolConnectTimeout:  7 * time.Second,
+	}}
+
+	databaseURL, pool, err := runtime.databaseInputs()
+	require.NoError(t, err)
+	require.Empty(t, databaseURL)
+	require.NotNil(t, pool)
+	t.Cleanup(pool.Close)
+	poolConfig := pool.Config()
+	require.Equal(t, int32(10), poolConfig.MaxConns)
+	require.Equal(t, int32(5), poolConfig.MinConns)
+	require.Equal(t, 2*time.Hour, poolConfig.MaxConnLifetime)
+	require.Equal(t, 2*time.Minute, poolConfig.MaxConnIdleTime)
+	require.Equal(t, 7*time.Second, poolConfig.ConnConfig.ConnectTimeout)
+	require.Equal(t, "billing", poolConfig.ConnConfig.RuntimeParams["application_name"])
+}
+
 func TestRunnerProducerLifecycle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	defer cancel()
 	app := mocksfoundation.NewApplication(t)
 	config := newApplicationConfig(map[string]any{
 		"dbos.enabled": true,
 		"dbos.role":    RoleProducer,
 	})
 	runtime := &Runtime{
+		app: app,
 		config: Config{
-			Role:            RoleProducer,
-			DatabaseDriver:  "postgres",
-			ShutdownTimeout: time.Second,
+			Role: RoleProducer,
+			// Leave the driver empty in this narrow runner test so it exercises
+			// DBOS client preparation without starting the separately tested
+			// package-owned experimental SQLite relay.
+			DatabaseDriver:  "",
+			DatabaseURL:     "sqlite:" + filepath.Join(t.TempDir(), "producer.db"),
+			DatabaseSchema:  "dbos",
+			LogLevel:        "error",
+			StartupTimeout:  10 * time.Second,
+			ShutdownTimeout: 10 * time.Second,
 		},
 	}
 
 	app.EXPECT().MakeConfig().Return(config).Once()
 	app.EXPECT().Make(Binding).Return(runtime, nil).Twice()
-	app.EXPECT().Context().Return(ctx).Once()
+	app.EXPECT().Context().Return(ctx).Maybe()
+	app.EXPECT().MakeLog().Return(nil).Maybe()
 	runner := &runner{app: app}
 
 	require.Equal(t, RunnerSignature, runner.Signature())
 	require.True(t, runner.ShouldRun())
-	require.NoError(t, runner.Run())
+	done := make(chan error, 1)
+	go func() { done <- runner.Run() }()
+	require.Eventually(t, func() bool {
+		runtime.mu.Lock()
+		defer runtime.mu.Unlock()
+		return runtime.client != nil
+	}, 10*time.Second, 10*time.Millisecond)
+	cancel()
+	require.NoError(t, <-done)
 	require.NoError(t, runner.Shutdown())
 	require.Equal(t, -100, runner.ShutdownPriority())
 }
