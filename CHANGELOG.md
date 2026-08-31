@@ -8,6 +8,14 @@ While the package is pre-1.0, minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-31
+
+### Fixed
+
+- `dbos:migrate` now uses a migration-only DBOS context, preventing a benign
+  notification-listener cancellation from being logged as an error during
+  successful command shutdown.
+
 ## [0.1.1] - 2026-08-31
 
 ### Added

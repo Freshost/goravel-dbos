@@ -77,8 +77,9 @@ traffic:
 ```
 
 The command initializes or upgrades only the internal schema owned by the DBOS
-SDK and then closes its migration client. It never runs or publishes migrations
-owned by the consuming application. Active package runners also call the
+SDK using a migration-only context that does not start a notification listener
+or workflow executor. It never runs or publishes migrations owned by the
+consuming application. Active package runners also call the
 idempotent `Runtime.Prepare()` on startup for fail-fast connectivity, but
 Goravel runners start concurrently; startup preparation is defense in depth,
 not a replacement for the explicit deployment step when using

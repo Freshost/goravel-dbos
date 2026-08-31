@@ -8,6 +8,7 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/goravel/framework/contracts/binding"
 	contractsdatabase "github.com/goravel/framework/contracts/database"
 	contractsorm "github.com/goravel/framework/contracts/database/orm"
+	contractslog "github.com/goravel/framework/contracts/log"
 	databasegorm "github.com/goravel/framework/database/gorm"
 	databaseorm "github.com/goravel/framework/database/orm"
 	"github.com/goravel/framework/facades"
@@ -51,6 +53,29 @@ func (s sqliteTransactionScanner) ScanRaw(query string, destination any, values 
 }
 
 const integrationDatabaseEnvironment = "GORAVEL_DBOS_TEST_DATABASE_URL"
+
+type recordingGoravelLog struct {
+	contractslog.Log
+	mu     sync.Mutex
+	errors []string
+}
+
+func (l *recordingGoravelLog) WithContext(context.Context) contractslog.Log { return l }
+func (l *recordingGoravelLog) With(map[string]any) contractslog.Writer      { return l }
+func (l *recordingGoravelLog) In(string) contractslog.Writer                { return l }
+func (*recordingGoravelLog) Debug(...any)                                   {}
+func (*recordingGoravelLog) Info(...any)                                    {}
+func (*recordingGoravelLog) Warning(...any)                                 {}
+func (l *recordingGoravelLog) Error(args ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.errors = append(l.errors, fmt.Sprint(args...))
+}
+func (l *recordingGoravelLog) recordedErrors() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string{}, l.errors...)
+}
 
 type pgxTransactionScanner struct {
 	ctx context.Context
@@ -205,8 +230,9 @@ func TestPostgresTransactionalEnqueueThroughGoravelORM(t *testing.T) {
 	})
 
 	runtimeApp := mocksfoundation.NewApplication(t)
+	runtimeLog := &recordingGoravelLog{}
 	runtimeApp.EXPECT().Context().Return(ctx).Maybe()
-	runtimeApp.EXPECT().MakeLog().Return(nil).Maybe()
+	runtimeApp.EXPECT().MakeLog().Return(runtimeLog).Maybe()
 	runtime := &Runtime{app: runtimeApp, config: Config{
 		Role:                     RoleProducer,
 		AppName:                  "goravel-dbos-orm-integration",
@@ -225,6 +251,10 @@ func TestPostgresTransactionalEnqueueThroughGoravelORM(t *testing.T) {
 		ShutdownTimeout:          10 * time.Second,
 		SchedulerPollingInterval: 30 * time.Second,
 	}}
+	require.NoError(t, runtime.MigrateSystemDatabase(), "migration must initialize a fresh DBOS schema without launching a client")
+	require.Nil(t, runtime.client, "migration must not retain a producer client")
+	require.False(t, runtime.closed, "migration must not close the process runtime")
+	require.Empty(t, runtimeLog.recordedErrors(), "successful migration must not emit listener shutdown errors")
 	require.NoError(t, runtime.Prepare(), "producer preparation must initialize a fresh DBOS schema")
 	require.NoError(t, runtime.Prepare(), "producer preparation must be idempotent")
 	t.Cleanup(func() { require.NoError(t, runtime.Shutdown()) })

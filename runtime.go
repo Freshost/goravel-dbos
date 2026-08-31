@@ -86,6 +86,44 @@ func (r *Runtime) Prepare() error {
 	return nil
 }
 
+// MigrateSystemDatabase initializes or upgrades the DBOS SDK-owned system
+// schema without starting a producer notification listener or workflow
+// executor. It is intended for short-lived release commands and does not alter
+// the lifecycle state of this Runtime.
+func (r *Runtime) MigrateSystemDatabase() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.config.Role == RoleDisabled {
+		return ErrDisabled
+	}
+	if r.closed {
+		return errors.New("goravel-dbos: runtime is closed")
+	}
+
+	databaseURL, systemDBPool, err := r.databaseInputs()
+	if err != nil {
+		return err
+	}
+	migrationContext, err := dbossdk.NewContext(r.app.Context(), dbossdk.Config{
+		AppName:                r.config.AppName,
+		DatabaseURL:            databaseURL,
+		SystemDBPool:           systemDBPool,
+		DatabaseSchema:         r.config.DatabaseSchema,
+		Logger:                 newDBOSLogger(r.app.MakeLog(), r.config.LogLevel),
+		SystemDBStartupTimeout: r.config.StartupTimeout,
+	})
+	if err != nil {
+		if systemDBPool != nil {
+			systemDBPool.Close()
+		}
+		return fmt.Errorf("goravel-dbos: migrate system database: %w", err)
+	}
+	if err := dbossdk.Shutdown(migrationContext, r.config.ShutdownTimeout); err != nil {
+		return fmt.Errorf("goravel-dbos: close migration context: %w", err)
+	}
+	return nil
+}
+
 // AddRegistrar adds application-owned workflow registration. It is safe during
 // Goravel provider Boot and rejected after executor startup begins.
 func (r *Runtime) AddRegistrar(registrar Registrar) error {

@@ -9,19 +9,17 @@ import (
 )
 
 type migrationRuntime struct {
-	prepared bool
-	closed   bool
+	migrated bool
 	role     string
 }
 
-func (r *migrationRuntime) Prepare() error           { r.prepared = true; return nil }
-func (r *migrationRuntime) Shutdown() error          { r.closed = true; return nil }
-func (r *migrationRuntime) Role() string             { return r.role }
-func (*migrationRuntime) DatabaseConnection() string { return "primary" }
-func (*migrationRuntime) DatabaseDriver() string     { return "postgres" }
-func (*migrationRuntime) DatabaseSchema() string     { return "dbos" }
+func (r *migrationRuntime) MigrateSystemDatabase() error { r.migrated = true; return nil }
+func (r *migrationRuntime) Role() string                 { return r.role }
+func (*migrationRuntime) DatabaseConnection() string     { return "primary" }
+func (*migrationRuntime) DatabaseDriver() string         { return "postgres" }
+func (*migrationRuntime) DatabaseSchema() string         { return "dbos" }
 
-func TestMigratePreparesAndClosesRuntime(t *testing.T) {
+func TestMigrateInitializesSystemDatabase(t *testing.T) {
 	app := mocksfoundation.NewApplication(t)
 	ctx := mocksconsole.NewContext(t)
 	runtime := &migrationRuntime{role: "producer"}
@@ -35,8 +33,7 @@ func TestMigratePreparesAndClosesRuntime(t *testing.T) {
 	require.Equal(t, "dbos:migrate", command.Signature())
 	require.NotEmpty(t, command.Description())
 	require.NoError(t, command.Handle(ctx))
-	require.True(t, runtime.prepared)
-	require.True(t, runtime.closed)
+	require.True(t, runtime.migrated)
 }
 
 func TestMigrateRejectsDisabledRuntime(t *testing.T) {
@@ -47,6 +44,5 @@ func TestMigrateRejectsDisabledRuntime(t *testing.T) {
 
 	err := NewMigrate(app).Handle(ctx)
 	require.ErrorContains(t, err, "disabled")
-	require.False(t, runtime.prepared)
-	require.False(t, runtime.closed)
+	require.False(t, runtime.migrated)
 }

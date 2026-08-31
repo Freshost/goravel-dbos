@@ -28,8 +28,7 @@ func (m *Migrate) Handle(ctx console.Context) error {
 		return fmt.Errorf("resolve goravel-dbos runtime: %w", err)
 	}
 	runtime, ok := value.(interface {
-		Prepare() error
-		Shutdown() error
+		MigrateSystemDatabase() error
 		Role() string
 		DatabaseConnection() string
 		DatabaseDriver() string
@@ -47,11 +46,8 @@ func (m *Migrate) Handle(ctx console.Context) error {
 	if runtime.DatabaseDriver() == "postgres" {
 		ctx.TwoColumnDetail("Database schema", runtime.DatabaseSchema())
 	}
-	if err := runtime.Prepare(); err != nil {
+	if err := runtime.MigrateSystemDatabase(); err != nil {
 		return fmt.Errorf("migrate DBOS system schema: %w", err)
-	}
-	if err := runtime.Shutdown(); err != nil {
-		return fmt.Errorf("close DBOS migration client: %w", err)
 	}
 	ctx.Success("DBOS system schema is ready")
 	return nil
