@@ -30,7 +30,7 @@ jobs:
 
     env:
       GORAVEL_DBOS_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/goravel_dbos_test?sslmode=disable
-      GORAVEL_DBOS_V1_FIXTURE: ${{ runner.temp }}/dbos-v1-fixture
+      GORAVEL_DBOS_V1_FIXTURE: /tmp/dbos-v1-fixture
 
     steps:
       - uses: actions/checkout@v6
