@@ -104,7 +104,7 @@ func (h *goravelLogHandler) addAttr(data map[string]any, group string, attr slog
 
 func sensitiveLogAttribute(key string) bool {
 	key = strings.ToLower(key)
-	for _, fragment := range []string{"database_url", "api_key", "password", "secret", "token"} {
+	for _, fragment := range []string{"database_url", "api_key", "password", "secret", "token", "payload", "input", "output"} {
 		if strings.Contains(key, fragment) {
 			return true
 		}

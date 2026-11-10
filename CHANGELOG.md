@@ -21,6 +21,8 @@ While the package is pre-1.0, minor versions may contain breaking changes.
   for source compatibility.
 - Conductor users must link the matching optional upstream Enterprise module
   in their applications; core workflow execution remains in the open-source SDK.
+- Redact payload, input and output attributes from SDK diagnostics as well as
+  connection URLs and credentials.
 
 ### Added
 
