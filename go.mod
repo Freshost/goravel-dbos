@@ -3,7 +3,7 @@ module github.com/freshost/goravel-dbos
 go 1.25.0
 
 require (
-	github.com/dbos-inc/dbos-transact-golang v1.0.0
+	github.com/dbos-inc/dbos-transact-golang v1.8.0
 	github.com/google/uuid v1.6.0
 	github.com/goravel/framework v1.18.0
 	github.com/jackc/pgx/v5 v5.10.0

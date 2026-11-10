@@ -18,7 +18,7 @@ func init() {
 		"schema": config.Env("DBOS_SCHEMA", "dbos"),
 		"pool": map[string]any{
 			// DBOS uses its own pgx pool over the same database.default DSN.
-			// These defaults match DBOS Go 1.0 while allowing applications to
+			// These defaults match DBOS Go 1.8 while allowing applications to
 			// enforce their PostgreSQL connection budget in native Goravel config.
 			"max_conns":                  20,
 			"min_conns":                  0,
@@ -46,10 +46,6 @@ func init() {
 		"conductor": map[string]any{
 			"url":     config.Env("DBOS_CONDUCTOR_URL", ""),
 			"api_key": config.Env("DBOS_CONDUCTOR_API_KEY", ""),
-		},
-		"admin_server": map[string]any{
-			"enabled": config.Env("DBOS_ADMIN_SERVER_ENABLED", false),
-			"port":    config.Env("DBOS_ADMIN_SERVER_PORT", 3001),
 		},
 		"worker": map[string]any{
 			// A worker process should execute DBOS and required application

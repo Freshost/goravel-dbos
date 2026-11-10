@@ -115,6 +115,24 @@ func TestLoadConfigRequiresVersionInProduction(t *testing.T) {
 	require.ErrorContains(t, err, "application_version is required")
 }
 
+func TestLoadConfigValidatesApplicationName(t *testing.T) {
+	for _, name := range []string{"FreshAgents", "ab", "fresh.agents"} {
+		t.Run(name, func(t *testing.T) {
+			input := validConfig()
+			input["dbos.app_name"] = name
+			_, err := loadConfig(input, "postgres")
+			require.ErrorContains(t, err, "dbos.app_name must contain")
+		})
+	}
+}
+
+func TestLoadConfigRejectsRemovedAdminServer(t *testing.T) {
+	input := validConfig()
+	input["dbos.admin_server.enabled"] = true
+	_, err := loadConfig(input, "postgres")
+	require.ErrorContains(t, err, "no longer provides an admin server")
+}
+
 func TestLoadConfigRejectsConflictingDBOSOverride(t *testing.T) {
 	previous, existed := os.LookupEnv("DBOS__APPVERSION")
 	require.NoError(t, os.Setenv("DBOS__APPVERSION", "other"))

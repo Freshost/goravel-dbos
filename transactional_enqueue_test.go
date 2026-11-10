@@ -9,6 +9,8 @@ import (
 
 	dbossdk "github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/stretchr/testify/require"
+
+	packagecontracts "github.com/freshost/goravel-dbos/contracts"
 )
 
 type fakeRuntime struct {
@@ -25,6 +27,7 @@ func (f fakeRuntime) Role() string {
 	return f.role
 }
 func (f fakeRuntime) ApplicationVersion() string { return f.version }
+func (f fakeRuntime) ApplicationName() string    { return "goravel-dbos-integration" }
 func (f fakeRuntime) DatabaseConnection() string { return "postgres" }
 func (f fakeRuntime) DatabaseDriver() string     { return "" }
 func (f fakeRuntime) DatabaseSchema() string     { return f.schema }
@@ -85,7 +88,7 @@ func TestEnqueueWithTransactionScannerBuildsDBOSV1Call(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "invoice:123", id)
 	require.Contains(t, tx.query, `"tenant""dbos".enqueue_workflow`)
-	require.Len(t, tx.values, 15)
+	require.Len(t, tx.values, 16)
 	require.Equal(t, "billing.invoice_paid.v1", tx.values[0])
 	require.Equal(t, "billing", tx.values[1])
 	require.JSONEq(t, `{"invoiceId":"123"}`, tx.values[2].(string))
@@ -94,6 +97,7 @@ func TestEnqueueWithTransactionScannerBuildsDBOSV1Call(t *testing.T) {
 	require.Equal(t, int64(30000), tx.values[7])
 	require.Equal(t, int32(5), tx.values[10])
 	require.JSONEq(t, `["admin","billing"]`, tx.values[13].(string))
+	require.Equal(t, "goravel-dbos-integration", tx.values[15])
 }
 
 func TestTransactionEnqueueGeneratesWorkflowID(t *testing.T) {
@@ -133,6 +137,16 @@ func TestTransactionEnqueueFailsClosed(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.NotEmpty(t, id)
+}
+
+func TestPostgresTransactionEnqueueRequiresApplicationIdentity(t *testing.T) {
+	// An existing consumer implementation still satisfies Runtime, but must
+	// opt into ApplicationRuntime before writing application-owned workflows.
+	runtime := struct{ packagecontracts.Runtime }{fakeRuntime{version: "dev", schema: "dbos"}}
+	tx := &fakeTransactionScanner{active: true, driver: "postgres"}
+	_, err := enqueueWithTransactionScanner(runtime, tx, Define[string, string]("example.v1", "example"), "input")
+	require.ErrorContains(t, err, "ApplicationName")
+	require.Empty(t, tx.query, "missing identity must fail before writing SQL")
 }
 
 func TestTransactionEnqueueRejectsIncompatibleQueueOptions(t *testing.T) {
