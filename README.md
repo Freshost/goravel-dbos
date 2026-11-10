@@ -31,7 +31,7 @@ out across all FreshStack services.
 
 - Go 1.25 or newer
 - Goravel 1.18
-- DBOS Transact Go 1.0
+- DBOS Transact Go 1.8
 - PostgreSQL
 - Optionally, file-backed SQLite in experimental mode
 
@@ -179,7 +179,7 @@ a database connection.
 
 DBOS needs its own PostgreSQL pool even though it reuses the native Goravel DSN
 and database. Tune that connection budget directly in `config/dbos.go`; these
-defaults match DBOS Go 1.0:
+defaults match DBOS Go 1.8:
 
 ```go
 "pool": map[string]any{
@@ -200,14 +200,14 @@ database URL:
 ./artisan dbos:doctor
 ```
 
-Creating a DBOS Client may apply pending SDK-owned migrations. Use
-`dbos:migrate` as the explicit release operation instead of relying on
-`dbos:doctor` for deployment ordering.
+DBOS Clients verify the schema without migrating it. Use `dbos:migrate` as the
+explicit release operation before `dbos:doctor` or direct `Runtime.Client()`
+calls. Producer runners retain automatic startup preparation through `Prepare`.
 
-For a worker-local liveness probe, enable the DBOS admin server and probe
-`GET /dbos-healthz` on its configured port. This confirms the local executor;
-end-to-end queue consumption still requires backlog monitoring or a synthetic
-workflow and is intentionally not inferred from a producer's health endpoint.
+DBOS Go 1.8 no longer provides the admin HTTP server or `/dbos-healthz`.
+Integrate worker readiness with the consuming application's lifecycle and
+monitor queue progress separately. Enabling the removed server fails with a
+migration instruction.
 
 The DBOS SDK owns its internal system storage. On SQLite, this package also owns
 and automatically versions `goravel_dbos_package_migrations` and
@@ -228,13 +228,16 @@ The package's PostgreSQL commit/rollback test runs when
 `GORAVEL_DBOS_TEST_DATABASE_URL` is set; otherwise it is skipped by the normal
 unit-test suite.
 
-Run the complete local verification against an isolated PostgreSQL database:
+All builds, tests and automated checks run in CI. GitHub Actions provisions
+isolated PostgreSQL 17 and runs tidy, vet, the full test and race suites, and
+the explicit `make test-postgres` release gate. It also builds a DBOS 1.0 fixture
+to verify migration and recovery from the previous SDK's persisted state.
 
-```shell
-export GORAVEL_DBOS_TEST_DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/goravel_dbos_test?sslmode=disable'
-make ci
-```
+## Agent teams and upgrades
 
-`make test-postgres` fails when the PostgreSQL URL is absent, which makes it
-useful as an explicit pre-release gate. GitHub Actions provisions PostgreSQL 17
-and runs the full test and race suites with the integration URL set.
+Use native DBOS steps, queued child workflows and durable messages for
+sequential/parallel agent execution and human input. Graph definitions and
+product behavior belong to the consuming platform. See
+[application-owned workflows](docs/workflows.md) for composition and recovery
+boundaries, and [upgrading to 0.2](docs/upgrading.md) before updating an existing
+application.

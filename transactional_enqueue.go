@@ -175,11 +175,15 @@ func enqueueWithTransactionScanner[Input any, Output any](
 	if normalizeDatabaseDriver(driver) == "sqlite" {
 		return enqueueSQLiteDispatch(runtime, tx, definition.name, definition.queue, string(encodedInput), options)
 	}
+	application, ok := runtime.(packagecontracts.ApplicationRuntime)
+	if !ok || strings.TrimSpace(application.ApplicationName()) == "" {
+		return "", errors.New("goravel-dbos: PostgreSQL transactional enqueue requires a runtime with ApplicationName")
+	}
 
 	schema := pgx.Identifier{runtime.DatabaseSchema()}.Sanitize()
 	query := fmt.Sprintf(`SELECT %s.enqueue_workflow(
 		?, ?, ARRAY[?::json], '{}'::json,
-		?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 	) AS workflow_id`, schema)
 	var result struct {
 		WorkflowID string `gorm:"column:workflow_id"`
@@ -200,6 +204,7 @@ func enqueueWithTransactionScanner[Input any, Output any](
 		nullString(options.authenticatedUser),
 		roles,
 		delayUntilMilliseconds(options.delay),
+		application.ApplicationName(),
 	); err != nil {
 		return "", fmt.Errorf("goravel-dbos: transactionally enqueue workflow %q: %w", definition.name, err)
 	}

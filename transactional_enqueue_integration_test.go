@@ -161,6 +161,7 @@ func TestPostgresTransactionalEnqueueCommitAndRollback(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, dbossdk.WorkflowStatusEnqueued, status.Status)
 	require.Equal(t, "integration-v1", status.ApplicationVersion)
+	require.Equal(t, "goravel-dbos-integration", status.ApplicationName)
 	require.Equal(t, "integration", status.QueueName)
 
 	firstRegistry := newRegistry(client)
@@ -329,6 +330,7 @@ func TestPostgresTransactionalEnqueueThroughGoravelORM(t *testing.T) {
 	status, err := committedWorkflow.GetStatus()
 	require.NoError(t, err)
 	require.Equal(t, dbossdk.WorkflowStatusEnqueued, status.Status)
+	require.Equal(t, runtime.ApplicationName(), status.ApplicationName)
 	_, err = dbossdk.RetrieveWorkflow[any](client, rollbackID)
 	require.Error(t, err)
 }
@@ -400,6 +402,20 @@ func TestPostgresProducerWorkerRuntimeLifecycle(t *testing.T) {
 	result, err := handle.GetResult(dbossdk.WithHandleTimeout(20 * time.Second))
 	require.NoError(t, err)
 	require.Equal(t, "processed:hello", result)
+	// Exercise the public SQL function's current payload layout all the way
+	// through a worker, rather than checking only that a row was inserted.
+	tx, err := admin.Begin(ctx)
+	require.NoError(t, err)
+	id, err := enqueueWithTransactionScanner(producer, pgxTransactionScanner{ctx: ctx, tx: tx}, definition, "transaction")
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit(ctx))
+	producerClient, err := producer.Client()
+	require.NoError(t, err)
+	transactional, err := dbossdk.RetrieveWorkflow[string](producerClient, id)
+	require.NoError(t, err)
+	result, err = transactional.GetResult(dbossdk.WithHandleTimeout(20 * time.Second))
+	require.NoError(t, err)
+	require.Equal(t, "processed:transaction", result)
 
 	require.ErrorIs(t, worker.AddRegistrar(RegistrarFunc(func(*Registry) error { return nil })), ErrAlreadyStarted)
 	require.NoError(t, producer.Shutdown())

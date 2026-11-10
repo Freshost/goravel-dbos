@@ -115,6 +115,13 @@ func TestLoadConfigRequiresVersionInProduction(t *testing.T) {
 	require.ErrorContains(t, err, "application_version is required")
 }
 
+func TestLoadConfigRejectsRemovedAdminServer(t *testing.T) {
+	input := validConfig()
+	input["dbos.admin_server.enabled"] = true
+	_, err := loadConfig(input, "postgres")
+	require.ErrorContains(t, err, "no longer provides an admin server")
+}
+
 func TestLoadConfigRejectsConflictingDBOSOverride(t *testing.T) {
 	previous, existed := os.LookupEnv("DBOS__APPVERSION")
 	require.NoError(t, os.Setenv("DBOS__APPVERSION", "other"))

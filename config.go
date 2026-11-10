@@ -60,7 +60,9 @@ type Config struct {
 	ShutdownTimeout          time.Duration
 	SchedulerPollingInterval time.Duration
 	ListenQueues             []string
-	AdminServer              bool
+	// Deprecated: DBOS Go removed its admin server. Enabling it is rejected.
+	AdminServer bool
+	// Deprecated: retained for source compatibility; no server is started.
 	AdminServerPort          int
 	EnablePatching           bool
 	DisableGoravelRunners    bool
@@ -149,6 +151,9 @@ func validateConfig(config configReader, cfg *Config) error {
 	if cfg.AppName == "" {
 		return errors.New("goravel-dbos: dbos.app_name or app.name is required")
 	}
+	if cfg.AdminServer {
+		return errors.New("goravel-dbos: DBOS Go no longer provides an admin server; disable dbos.admin_server.enabled and replace the /dbos-healthz probe")
+	}
 	if cfg.ApplicationVersion == "" {
 		if strings.EqualFold(config.GetString("app.env"), "production") {
 			return errors.New("goravel-dbos: dbos.application_version is required in production")
@@ -162,9 +167,6 @@ func validateConfig(config configReader, cfg *Config) error {
 		cfg.SQLiteRelayPollInterval <= 0 || cfg.SQLiteLeaseDuration <= 0 || cfg.SQLiteRetryBase <= 0 ||
 		cfg.SQLiteRetryMax < cfg.SQLiteRetryBase || cfg.SQLiteDeliveredRetention <= 0 {
 		return errors.New("goravel-dbos: lifecycle, scheduler and SQLite relay intervals must be positive, and retry maximum must not be below its base")
-	}
-	if cfg.AdminServerPort < 1 || cfg.AdminServerPort > 65535 {
-		return errors.New("goravel-dbos: admin server port must be between 1 and 65535")
 	}
 	if cfg.LogLevel != "debug" && cfg.LogLevel != "info" && cfg.LogLevel != "warn" && cfg.LogLevel != "error" {
 		return fmt.Errorf("goravel-dbos: invalid log level %q", cfg.LogLevel)

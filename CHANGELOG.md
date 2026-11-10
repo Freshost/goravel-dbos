@@ -8,6 +8,32 @@ While the package is pre-1.0, minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-10
+
+### Changed
+
+- Upgrade DBOS Go from 1.0.0 to 1.8.0, retaining Go 1.25 and Goravel 1.18.
+- Scope producer Clients and package ingress enqueue to the application name;
+  include ownership in PostgreSQL's public transactional enqueue function.
+- Preserve producer startup schema preparation through a migration-only context;
+  direct Clients now verify the schema without migrating it.
+- Reject enabling the removed DBOS admin server; retain deprecated Config fields
+  for source compatibility.
+- Conductor users must link the matching optional upstream Enterprise module
+  in their applications; core workflow execution remains in the open-source SDK.
+- Redact payload, input and output attributes from SDK diagnostics as well as
+  connection URLs and credentials.
+
+### Added
+
+- `Runtime.ApplicationName`, additive `contracts.ApplicationRuntime` and
+  `testing.Runtime.AppNameValue`. Custom runtimes must expose an application
+  name for PostgreSQL transactional enqueue; missing identity fails closed.
+- PostgreSQL verification of DBOS 1.0 schema/history upgrades, concurrent child
+  workflows, lineage, durable human input and restart recovery.
+- Application workflow composition and [upgrade instructions](docs/upgrading.md),
+  including the replacement of `/dbos-healthz` probes and deployment ordering.
+
 ## [0.1.2] - 2026-08-31
 
 ### Fixed

@@ -13,3 +13,11 @@ type Runtime interface {
 	DatabaseDriver() string
 	DatabaseSchema() string
 }
+
+// ApplicationRuntime identifies the application that owns newly enqueued
+// workflows. PostgreSQL transaction-bound enqueue requires this additional
+// contract. Runtime remains unchanged for existing consumer interfaces.
+type ApplicationRuntime interface {
+	Runtime
+	ApplicationName() string
+}

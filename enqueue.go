@@ -29,6 +29,9 @@ func Enqueue[Input any, Output any](
 	// Force the package's validated version so separate producer and worker
 	// binaries always target the same workflow code.
 	options = append(options, dbossdk.WithEnqueueApplicationVersion(runtime.ApplicationVersion()))
+	if application, ok := runtime.(packagecontracts.ApplicationRuntime); ok {
+		options = append(options, dbossdk.WithEnqueueApplicationName(application.ApplicationName()))
+	}
 	handle, err := dbossdk.Enqueue[Output](client, definition.queue, definition.name, input, options...)
 	if err != nil {
 		return nil, fmt.Errorf("goravel-dbos: enqueue workflow %q: %w", definition.name, err)

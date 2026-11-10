@@ -211,7 +211,8 @@ func TestRunnerProducerLifecycle(t *testing.T) {
 	runtime := &Runtime{
 		app: app,
 		config: Config{
-			Role: RoleProducer,
+			Role:    RoleProducer,
+			AppName: "goravel-dbos-runner",
 			// Leave the driver empty in this narrow runner test so it exercises
 			// DBOS client preparation without starting the separately tested
 			// package-owned experimental SQLite relay.
@@ -283,6 +284,7 @@ type enqueueRuntime struct {
 func (r enqueueRuntime) Client() (dbossdk.Client, error) { return r.client, r.err }
 func (enqueueRuntime) Role() string                      { return RoleProducer }
 func (enqueueRuntime) ApplicationVersion() string        { return "2026.08.1" }
+func (enqueueRuntime) ApplicationName() string           { return "billing" }
 func (enqueueRuntime) DatabaseConnection() string        { return "primary" }
 func (enqueueRuntime) DatabaseDriver() string            { return "postgres" }
 func (enqueueRuntime) DatabaseSchema() string            { return "dbos" }
@@ -298,7 +300,7 @@ func TestEnqueueUsesStableTypedDefinitionAndVersion(t *testing.T) {
 	require.Equal(t, "billing", client.queue)
 	require.Equal(t, "billing.invoice.v1", client.workflowName)
 	require.Equal(t, map[string]string{"invoice_id": "123"}, client.input)
-	require.Equal(t, 2, client.optionCount, "caller options plus the package application-version option")
+	require.Equal(t, 3, client.optionCount, "caller options plus the package application version and name")
 }
 
 func TestEnqueueFailsClosed(t *testing.T) {

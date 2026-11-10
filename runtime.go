@@ -38,6 +38,7 @@ type Runtime struct {
 }
 
 var _ packagecontracts.Runtime = (*Runtime)(nil)
+var _ packagecontracts.ApplicationRuntime = (*Runtime)(nil)
 
 func NewRuntime(app contractsfoundation.Application) (*Runtime, error) {
 	if app == nil {
@@ -69,6 +70,7 @@ func NewRuntime(app contractsfoundation.Application) (*Runtime, error) {
 }
 
 func (r *Runtime) Role() string               { return r.config.Role }
+func (r *Runtime) ApplicationName() string    { return r.config.AppName }
 func (r *Runtime) ApplicationVersion() string { return r.config.ApplicationVersion }
 func (r *Runtime) DatabaseConnection() string { return r.config.DatabaseConnection }
 func (r *Runtime) DatabaseDriver() string     { return r.config.DatabaseDriver }
@@ -79,6 +81,13 @@ func (r *Runtime) DatabaseSchema() string     { return r.config.DatabaseSchema }
 // than once. Applications should run dbos:migrate as an explicit deployment
 // step before processes that use transaction-bound enqueue accept traffic.
 func (r *Runtime) Prepare() error {
+	// Standalone clients only verify the schema as of DBOS Go 1.8. Preserve
+	// startup preparation through a separate migration-only context.
+	if r.config.Role == RoleProducer {
+		if err := r.MigrateSystemDatabase(); err != nil {
+			return err
+		}
+	}
 	_, err := r.Client()
 	if err != nil {
 		return fmt.Errorf("goravel-dbos: prepare system database: %w", err)
@@ -143,7 +152,8 @@ func (r *Runtime) AddRegistrar(registrar Registrar) error {
 }
 
 // Client returns a lazily-created standalone client in producer processes and
-// the executor Context once a worker has started.
+// the executor Context in worker processes. A standalone client requires an
+// up-to-date schema: call MigrateSystemDatabase or Prepare before first use.
 func (r *Runtime) Client() (dbossdk.Client, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -257,8 +267,6 @@ func (r *Runtime) newExecutor() (dbossdk.Context, error) {
 		EnablePatching:           r.config.EnablePatching,
 		SchedulerPollingInterval: r.config.SchedulerPollingInterval,
 		SystemDBStartupTimeout:   r.config.StartupTimeout,
-		AdminServer:              r.config.AdminServer,
-		AdminServerPort:          r.config.AdminServerPort,
 	})
 	if err != nil {
 		if systemDBPool != nil {
@@ -275,6 +283,7 @@ func (r *Runtime) newClient() (dbossdk.Client, error) {
 		return nil, err
 	}
 	client, err := dbossdk.NewClient(r.app.Context(), dbossdk.ClientConfig{
+		AppName:                r.config.AppName,
 		DatabaseURL:            databaseURL,
 		SystemDBPool:           systemDBPool,
 		DatabaseSchema:         r.config.DatabaseSchema,

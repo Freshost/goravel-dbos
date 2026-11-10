@@ -15,6 +15,7 @@ type Runtime struct {
 	ClientValue     dbossdk.Client
 	ClientError     error
 	RoleValue       string
+	AppNameValue    string
 	VersionValue    string
 	ConnectionValue string
 	DriverValue     string
@@ -34,9 +35,11 @@ func (r *Runtime) Client() (dbossdk.Client, error) {
 }
 
 func (r *Runtime) Role() string               { return r.RoleValue }
+func (r *Runtime) ApplicationName() string    { return r.AppNameValue }
 func (r *Runtime) ApplicationVersion() string { return r.VersionValue }
 func (r *Runtime) DatabaseConnection() string { return r.ConnectionValue }
 func (r *Runtime) DatabaseDriver() string     { return r.DriverValue }
 func (r *Runtime) DatabaseSchema() string     { return r.SchemaValue }
 
 var _ packagecontracts.Runtime = (*Runtime)(nil)
+var _ packagecontracts.ApplicationRuntime = (*Runtime)(nil)
