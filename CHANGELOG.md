@@ -17,8 +17,10 @@ While the package is pre-1.0, minor versions may contain breaking changes.
   include ownership in PostgreSQL's public transactional enqueue function.
 - Preserve producer startup schema preparation through a migration-only context;
   direct Clients now verify the schema without migrating it.
-- Validate upstream's application-name format. Reject enabling the removed DBOS
-  admin server; retain deprecated Config fields for source compatibility.
+- Reject enabling the removed DBOS admin server; retain deprecated Config fields
+  for source compatibility.
+- Conductor users must link the matching optional upstream Enterprise module
+  in their applications; core workflow execution remains in the open-source SDK.
 
 ### Added
 

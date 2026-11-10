@@ -38,6 +38,7 @@ type Runtime struct {
 }
 
 var _ packagecontracts.Runtime = (*Runtime)(nil)
+var _ packagecontracts.ApplicationRuntime = (*Runtime)(nil)
 
 func NewRuntime(app contractsfoundation.Application) (*Runtime, error) {
 	if app == nil {
@@ -151,7 +152,8 @@ func (r *Runtime) AddRegistrar(registrar Registrar) error {
 }
 
 // Client returns a lazily-created standalone client in producer processes and
-// the executor Context once a worker has started.
+// the executor Context in worker processes. A standalone client requires an
+// up-to-date schema: call MigrateSystemDatabase or Prepare before first use.
 func (r *Runtime) Client() (dbossdk.Client, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

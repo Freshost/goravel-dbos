@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -75,8 +74,6 @@ type Config struct {
 	SQLiteRetryMax           time.Duration
 	SQLiteDeliveredRetention time.Duration
 }
-
-var applicationNamePattern = regexp.MustCompile(`^[a-z0-9_-]{3,256}$`)
 
 func loadConfig(config configReader, databaseDriver ...string) (Config, error) {
 	if config == nil {
@@ -153,9 +150,6 @@ func validateConfig(config configReader, cfg *Config) error {
 	}
 	if cfg.AppName == "" {
 		return errors.New("goravel-dbos: dbos.app_name or app.name is required")
-	}
-	if !applicationNamePattern.MatchString(cfg.AppName) {
-		return errors.New("goravel-dbos: dbos.app_name must contain 3 to 256 lowercase letters, numbers, dashes or underscores")
 	}
 	if cfg.AdminServer {
 		return errors.New("goravel-dbos: DBOS Go no longer provides an admin server; disable dbos.admin_server.enabled and replace the /dbos-healthz probe")

@@ -64,8 +64,12 @@ func seed() error {
 		return err
 	}
 	for _, id := range []string{"upgrade-sdk", "upgrade-sql"} {
-		if _, err := dbos.GetEvent[bool](executor, id, "ready", 20*time.Second); err != nil {
+		ready, err := dbos.GetEvent[bool](executor, id, "ready", 20*time.Second)
+		if err != nil {
 			return err
+		}
+		if !ready {
+			return fmt.Errorf("workflow %s did not reach its checkpoint", id)
 		}
 	}
 	return nil

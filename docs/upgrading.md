@@ -15,6 +15,7 @@ SQLite still requires explicit experimental opt-in.
 | Workflow payloads moved into separate SDK tables | Continue using the public `enqueue_workflow` function and SDK APIs; let SDK migrations own the storage layout |
 | Standalone Clients verify the schema without migrating it | Retain producer startup `Prepare` through a migration-only context; keep `dbos:migrate` as the explicit deployment operation |
 | Admin HTTP server removed | Retain deprecated public Config fields for source compatibility; reject enabling the server and remove it from newly published config |
+| Conductor moved into the optional Enterprise module | Applications using Conductor add the matching extension explicitly; ordinary PostgreSQL workflows require no commercial extension |
 | Durable child enqueue lineage, messaging, parallel steps and workflow patching | Use native SDK primitives directly from application workflow contexts; no graph DSL or product policy is added |
 
 The public `contracts.Runtime` interface and existing workflow declarations,
@@ -29,7 +30,8 @@ and the additive `contracts.ApplicationRuntime` interface expose ownership.
    previous application binary, rather than a dependency downgrade alone.
 2. Set a stable `DBOS_APP_NAME` containing 3–256 lowercase letters, numbers,
    dashes or underscores, identically in producers and workers. New upstream
-   validation rejects names such as `FreshAgents` or `fresh.agents`. Existing
+   Conductor validation rejects names such as `FreshAgents` or `fresh.agents`;
+   self-hosted SDK contexts warn and continue, preserving existing names. Existing
    1.0 records have no application owner and remain readable/recoverable;
    continue using the existing database/schema for that application. Ownership
    is routing metadata, not tenant authorization or isolation of legacy rows.
@@ -49,6 +51,11 @@ and the additive `contracts.ApplicationRuntime` interface expose ownership.
    `ApplicationName() string` before using PostgreSQL `EnqueueInTransaction`.
    A missing identity fails before executing SQL. The package's concrete Runtime
    already provides it. Test fakes can set `testing.Runtime.AppNameValue`.
+7. If using DBOS Conductor, link `go.dbos.dev/dbos-enterprise-go` at the same
+   minor version as the SDK (1.8), with a blank import in your application.
+   The SDK now requires that optional module to connect. Without Conductor,
+   normal workflow execution and local restart recovery remain available in
+   the open-source SDK without this dependency.
 
 Package enqueue helpers pin both the application version and (when available)
 application name. Use the raw SDK Client explicitly for intentional routing to
