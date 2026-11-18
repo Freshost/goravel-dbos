@@ -8,6 +8,7 @@ import (
 	"time"
 
 	dbossdk "github.com/dbos-inc/dbos-transact-golang/dbos"
+	mocksorm "github.com/goravel/framework/mocks/database/orm"
 	"github.com/stretchr/testify/require"
 
 	packagecontracts "github.com/freshost/goravel-dbos/contracts"
@@ -150,6 +151,13 @@ func TestTransactionEnqueueFailsClosed(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.NotEmpty(t, id)
+}
+
+func TestPublicTransactionalEnqueueRequiresWriterIdentity(t *testing.T) {
+	tx := mocksorm.NewQuery(t)
+	tx.EXPECT().InTransaction().Return(true).Once()
+	_, err := EnqueueInTransaction(fakeRuntime{}, tx, Define[string, string]("example.v1", "example"), "private")
+	require.ErrorContains(t, err, "TransactionDB")
 }
 
 func TestPostgresTransactionEnqueueRequiresApplicationIdentity(t *testing.T) {

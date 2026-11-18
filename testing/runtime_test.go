@@ -29,4 +29,9 @@ func TestRuntimeReportsMissingClientAndTracksCalls(t *testing.T) {
 	_, err = runtime.Client()
 	require.ErrorIs(t, err, context.Canceled)
 	require.Equal(t, 2, runtime.ClientCalls)
+	_, err = runtime.TransactionDB()
+	require.ErrorContains(t, err, "no TransactionDBValue configured")
+	runtime.TransactionDBError = context.Canceled
+	_, err = runtime.TransactionDB()
+	require.ErrorIs(t, err, context.Canceled)
 }

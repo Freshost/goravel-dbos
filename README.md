@@ -160,8 +160,8 @@ separate driver pools. `WithTransactionDeadline` is unavailable on SQLite; use
 `WithTransactionTimeout` for portable behavior.
 
 Transaction-bound enqueue accepts only transactions from the selected native
-writer pool and rejects workflow IDs already assigned to another workflow or
-queue. A connection must have exactly one writer. Custom runtime implementations
+writer pool. PostgreSQL also rejects workflow IDs already assigned to another
+workflow or queue. A connection must have exactly one writer. Custom runtime implementations
 must implement `contracts.TransactionRuntime.TransactionDB()` and return that
 Goravel writer pool; ordinary enqueue keeps the existing `contracts.Runtime` API.
 
