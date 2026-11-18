@@ -11,6 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/goravel/framework/contracts/database/orm"
 	"github.com/jackc/pgx/v5"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	packagecontracts "github.com/freshost/goravel-dbos/contracts"
 )
@@ -41,19 +43,28 @@ type transactionScanner interface {
 	ExecRaw(query string, values ...any) (int64, error)
 }
 
-type goravelTransactionScanner struct{ query orm.Query }
+type goravelTransactionScanner struct {
+	query orm.Query
+	db    *gorm.DB
+}
 
 func (s goravelTransactionScanner) InTransaction() bool { return s.query.InTransaction() }
 func (s goravelTransactionScanner) Driver() string      { return s.query.Driver() }
 func (s goravelTransactionScanner) ScanRaw(query string, destination any, values ...any) error {
-	return s.query.Raw(query, values...).Scan(destination)
+	return s.db.Raw(query, values...).Scan(destination).Error
 }
 func (s goravelTransactionScanner) ExecRaw(query string, values ...any) (int64, error) {
-	result, err := s.query.Exec(query, values...)
-	if err != nil {
-		return 0, err
+	result := s.db.Exec(query, values...)
+	return result.RowsAffected, result.Error
+}
+
+func privateGormQuery(query orm.Query) (*gorm.DB, error) {
+	provider, ok := query.(interface{ Instance() *gorm.DB })
+	if !ok || provider.Instance() == nil {
+		return nil, errors.New("goravel-dbos: native GORM query is required")
 	}
-	return result.RowsAffected, nil
+	// Keep workflow payloads out of Goravel SQL diagnostics without changing the caller's logger.
+	return provider.Instance().Session(&gorm.Session{Logger: logger.Discard}), nil
 }
 
 func WithTransactionWorkflowID(id string) TransactionEnqueueOption {
@@ -111,10 +122,32 @@ func EnqueueInTransaction[Input any, Output any](
 	input Input,
 	optionFns ...TransactionEnqueueOption,
 ) (string, error) {
-	if tx == nil {
+	if runtime == nil {
+		return "", errors.New("goravel-dbos: runtime is required")
+	}
+	if runtime.Role() == RoleDisabled {
+		return "", ErrDisabled
+	}
+	if tx == nil || !tx.InTransaction() {
 		return "", errors.New("goravel-dbos: transactional enqueue requires an active Goravel transaction")
 	}
-	return enqueueWithTransactionScanner(runtime, goravelTransactionScanner{query: tx}, definition, input, optionFns...)
+	owner, ok := runtime.(packagecontracts.TransactionRuntime)
+	if !ok {
+		return "", errors.New("goravel-dbos: transactional enqueue requires a runtime with TransactionDB")
+	}
+	expected, err := owner.TransactionDB()
+	if err != nil {
+		return "", errors.New("goravel-dbos: cannot resolve native writer pool")
+	}
+	actual, err := tx.DB()
+	if err != nil || expected == nil || actual != expected {
+		return "", errors.New("goravel-dbos: transaction does not belong to the configured native writer pool")
+	}
+	db, err := privateGormQuery(tx)
+	if err != nil {
+		return "", err
+	}
+	return enqueueWithTransactionScanner(runtime, goravelTransactionScanner{query: tx, db: db}, definition, input, optionFns...)
 }
 
 func enqueueWithTransactionScanner[Input any, Output any](
@@ -210,6 +243,16 @@ func enqueueWithTransactionScanner[Input any, Output any](
 	}
 	if result.WorkflowID == "" {
 		return "", fmt.Errorf("goravel-dbos: transactional enqueue for %q returned an empty workflow ID", definition.name)
+	}
+	var existing struct {
+		WorkflowName string `gorm:"column:name"`
+		QueueName    string `gorm:"column:queue_name"`
+	}
+	if err := tx.ScanRaw(fmt.Sprintf(`SELECT name, queue_name FROM %s.workflow_status WHERE workflow_uuid = ?`, schema), &existing, result.WorkflowID); err != nil {
+		return "", fmt.Errorf("goravel-dbos: verify transactional workflow identity: %w", err)
+	}
+	if existing.WorkflowName != definition.name || existing.QueueName != definition.queue {
+		return "", errors.New("goravel-dbos: workflow ID is already assigned to a different workflow or queue")
 	}
 	return result.WorkflowID, nil
 }

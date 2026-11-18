@@ -4,6 +4,7 @@
 package testing
 
 import (
+	"database/sql"
 	"errors"
 
 	dbossdk "github.com/dbos-inc/dbos-transact-golang/dbos"
@@ -12,15 +13,27 @@ import (
 )
 
 type Runtime struct {
-	ClientValue     dbossdk.Client
-	ClientError     error
-	RoleValue       string
-	AppNameValue    string
-	VersionValue    string
-	ConnectionValue string
-	DriverValue     string
-	SchemaValue     string
-	ClientCalls     int
+	ClientValue        dbossdk.Client
+	ClientError        error
+	RoleValue          string
+	AppNameValue       string
+	VersionValue       string
+	ConnectionValue    string
+	DriverValue        string
+	SchemaValue        string
+	ClientCalls        int
+	TransactionDBValue *sql.DB
+	TransactionDBError error
+}
+
+func (r *Runtime) TransactionDB() (*sql.DB, error) {
+	if r.TransactionDBError != nil {
+		return nil, r.TransactionDBError
+	}
+	if r.TransactionDBValue == nil {
+		return nil, errors.New("goravel-dbos testing: no TransactionDBValue configured")
+	}
+	return r.TransactionDBValue, nil
 }
 
 func (r *Runtime) Client() (dbossdk.Client, error) {
@@ -43,3 +56,4 @@ func (r *Runtime) DatabaseSchema() string     { return r.SchemaValue }
 
 var _ packagecontracts.Runtime = (*Runtime)(nil)
 var _ packagecontracts.ApplicationRuntime = (*Runtime)(nil)
+var _ packagecontracts.TransactionRuntime = (*Runtime)(nil)

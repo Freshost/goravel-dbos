@@ -5,11 +5,32 @@ import (
 	"os"
 	"testing"
 
+	"github.com/goravel/framework/contracts/database"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 )
 
 type fakeConfig map[string]any
+
+func loadTestConfig(input fakeConfig, drivers ...string) (Config, error) {
+	driver := ""
+	if len(drivers) > 0 {
+		driver = drivers[0]
+	}
+	prefix := "database.connections." + input.GetString("database.default") + "."
+	return loadConfig(input, database.Config{
+		Driver:   driver,
+		Dsn:      input.GetString(prefix + "dsn"),
+		Host:     input.GetString(prefix + "host"),
+		Port:     input.GetInt(prefix+"port", 5432),
+		Database: input.GetString(prefix + "database"),
+		Username: input.GetString(prefix + "username"),
+		Password: input.GetString(prefix + "password"),
+		Sslmode:  input.GetString(prefix+"sslmode", "disable"),
+		Timezone: input.GetString(prefix+"timezone", input.GetString("app.timezone", "UTC")),
+		Schema:   input.GetString(prefix+"schema", "public"),
+	})
+}
 
 func (f fakeConfig) GetBool(key string, defaults ...bool) bool {
 	if value, exists := f[key]; exists {
@@ -74,7 +95,7 @@ func validConfig() fakeConfig {
 }
 
 func TestLoadConfigBuildsEscapedNativePostgresURL(t *testing.T) {
-	cfg, err := loadConfig(validConfig(), "postgres")
+	cfg, err := loadTestConfig(validConfig(), "postgres")
 	require.NoError(t, err)
 	require.Equal(t, RoleProducer, cfg.Role)
 	require.Equal(t, "primary", cfg.DatabaseConnection)
@@ -87,15 +108,15 @@ func TestLoadConfigBuildsEscapedNativePostgresURL(t *testing.T) {
 func TestLoadConfigBuildsNativePostgresUnixSocketURL(t *testing.T) {
 	input := validConfig()
 	input["database.connections.primary.host"] = "/run/postgresql"
-	input["database.connections.primary.port"] = "not-used-for-sockets"
+	input["database.connections.primary.port"] = "5433"
 
-	cfg, err := loadConfig(input, "postgres")
+	cfg, err := loadTestConfig(input, "postgres")
 	require.NoError(t, err)
-	require.Equal(t, "postgresql://app%20user:p%40ss%2Fword@/billing%20data?host=%2Frun%2Fpostgresql&search_path=tenant&sslmode=require&timezone=Europe%2FPrague", cfg.DatabaseURL)
+	require.Equal(t, "postgresql://app%20user:p%40ss%2Fword@/billing%20data?host=%2Frun%2Fpostgresql&port=5433&search_path=tenant&sslmode=require&timezone=Europe%2FPrague", cfg.DatabaseURL)
 	poolConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
 	require.NoError(t, err)
 	require.Equal(t, "/run/postgresql", poolConfig.ConnConfig.Host)
-	require.Equal(t, uint16(5432), poolConfig.ConnConfig.Port)
+	require.Equal(t, uint16(5433), poolConfig.ConnConfig.Port)
 }
 
 func TestLoadConfigValidatesDBOSPoolBudget(t *testing.T) {
@@ -103,7 +124,7 @@ func TestLoadConfigValidatesDBOSPoolBudget(t *testing.T) {
 	input["dbos.pool.max_conns"] = 5
 	input["dbos.pool.min_conns"] = 6
 
-	_, err := loadConfig(input, "postgres")
+	_, err := loadTestConfig(input, "postgres")
 	require.ErrorContains(t, err, "min_conns")
 }
 
@@ -111,14 +132,14 @@ func TestLoadConfigRequiresVersionInProduction(t *testing.T) {
 	input := validConfig()
 	input["dbos.application_version"] = ""
 	input["app.env"] = "production"
-	_, err := loadConfig(input, "postgres")
+	_, err := loadTestConfig(input, "postgres")
 	require.ErrorContains(t, err, "application_version is required")
 }
 
 func TestLoadConfigRejectsRemovedAdminServer(t *testing.T) {
 	input := validConfig()
 	input["dbos.admin_server.enabled"] = true
-	_, err := loadConfig(input, "postgres")
+	_, err := loadTestConfig(input, "postgres")
 	require.ErrorContains(t, err, "no longer provides an admin server")
 }
 
@@ -132,21 +153,21 @@ func TestLoadConfigRejectsConflictingDBOSOverride(t *testing.T) {
 			_ = os.Unsetenv("DBOS__APPVERSION")
 		}
 	})
-	_, err := loadConfig(validConfig(), "postgres")
+	_, err := loadTestConfig(validConfig(), "postgres")
 	require.ErrorContains(t, err, "conflicts")
 }
 
 func TestLoadConfigRejectsUnsupportedNativeDefaultConnection(t *testing.T) {
 	input := validConfig()
 	input["database.default"] = "sqlite"
-	_, err := loadConfig(input, "mysql")
+	_, err := loadTestConfig(input, "mysql")
 	require.ErrorContains(t, err, "unsupported driver")
 }
 
 func TestLoadConfigReusesNativePostgresDSN(t *testing.T) {
 	input := validConfig()
 	input["database.connections.primary.dsn"] = "postgresql://native:native@db.internal:5432/native?sslmode=require"
-	cfg, err := loadConfig(input, "postgres")
+	cfg, err := loadTestConfig(input, "postgres")
 	require.NoError(t, err)
 	require.Equal(t, input["database.connections.primary.dsn"], cfg.DatabaseURL)
 }
@@ -156,7 +177,7 @@ func TestLoadConfigReusesFileBackedSQLite(t *testing.T) {
 	input["database.default"] = "sqlite"
 	input["database.connections.sqlite.database"] = "/tmp/app.db"
 	input["dbos.sqlite.experimental"] = true
-	cfg, err := loadConfig(input, "sqlite")
+	cfg, err := loadTestConfig(input, "sqlite")
 	require.NoError(t, err)
 	require.Equal(t, "sqlite", cfg.DatabaseDriver)
 	require.Equal(t, "sqlite:/tmp/app.db", cfg.DatabaseURL)
@@ -167,22 +188,40 @@ func TestLoadConfigRequiresExplicitExperimentalSQLiteOptIn(t *testing.T) {
 	input := validConfig()
 	input["database.default"] = "sqlite"
 	input["database.connections.sqlite.database"] = "/tmp/app.db"
-	_, err := loadConfig(input, "sqlite")
+	_, err := loadTestConfig(input, "sqlite")
 	require.ErrorContains(t, err, "SQLite support is experimental")
 	require.ErrorContains(t, err, "DBOS_SQLITE_EXPERIMENTAL=true")
 }
 
 func TestLoadConfigRejectsInMemorySQLite(t *testing.T) {
+	for _, dsn := range []string{
+		":memory:", "file::memory:", "file::memory:?cache=shared",
+		"sqlite::memory:", "sqlite:file::memory:?cache=shared",
+		"sqlite3:file::memory:?cache=shared", "file:app?mode=memory",
+		"file:app?mode=%6demory", "file:%3Amemory%3A?cache=shared",
+	} {
+		t.Run(dsn, func(t *testing.T) {
+			input := validConfig()
+			input["database.default"] = "sqlite"
+			input["database.connections.sqlite.dsn"] = dsn
+			input["dbos.sqlite.experimental"] = true
+			_, err := loadTestConfig(input, "sqlite")
+			require.ErrorContains(t, err, "in-memory SQLite")
+		})
+	}
+}
+
+func TestInvalidPostgresDSNDoesNotExposeCredentials(t *testing.T) {
 	input := validConfig()
-	input["database.default"] = "sqlite"
-	input["database.connections.sqlite.dsn"] = ":memory:"
-	input["dbos.sqlite.experimental"] = true
-	_, err := loadConfig(input, "sqlite")
-	require.ErrorContains(t, err, "in-memory SQLite")
+	input["database.connections.primary.dsn"] = "postgresql://app@localhost/billing?password=private&sslmode=invalid"
+	_, err := loadTestConfig(input, "postgres")
+	require.ErrorContains(t, err, "DSN is invalid")
+	require.NotContains(t, err.Error(), "private")
+	require.NotContains(t, err.Error(), "postgresql://")
 }
 
 func TestDisabledRoleDoesNotRequireDatabaseConfiguration(t *testing.T) {
-	cfg, err := loadConfig(fakeConfig{
+	cfg, err := loadTestConfig(fakeConfig{
 		"dbos.enabled": false,
 		"dbos.role":    RoleProducer,
 	})

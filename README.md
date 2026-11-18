@@ -159,6 +159,12 @@ is rejected because Goravel and DBOS cannot safely share it across their
 separate driver pools. `WithTransactionDeadline` is unavailable on SQLite; use
 `WithTransactionTimeout` for portable behavior.
 
+Transaction-bound enqueue accepts only transactions from the selected native
+writer pool. PostgreSQL also rejects workflow IDs already assigned to another
+workflow or queue. A connection must have exactly one writer. Custom runtime implementations
+must implement `contracts.TransactionRuntime.TransactionDB()` and return that
+Goravel writer pool; ordinary enqueue keeps the existing `contracts.Runtime` API.
+
 Use ordinary `Enqueue` when no application database write must be committed with
 the workflow. Whenever a business write and workflow creation form one
 invariant, call `EnqueueInTransaction` inside that same short transaction.
@@ -239,5 +245,5 @@ Use native DBOS steps, queued child workflows and durable messages for
 sequential/parallel agent execution and human input. Graph definitions and
 product behavior belong to the consuming platform. See
 [application-owned workflows](docs/workflows.md) for composition and recovery
-boundaries, and [upgrading to 0.2](docs/upgrading.md) before updating an existing
+boundaries, and [upgrade instructions](docs/upgrading.md) before updating an existing
 application.

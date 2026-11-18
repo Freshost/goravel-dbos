@@ -2,6 +2,7 @@ package goraveldbos
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -10,6 +11,8 @@ import (
 
 	dbossdk "github.com/dbos-inc/dbos-transact-golang/dbos"
 	_ "github.com/dbos-inc/dbos-transact-golang/dbos/driver/sqlite"
+	contractsdatabase "github.com/goravel/framework/contracts/database"
+	contractsdriver "github.com/goravel/framework/contracts/database/driver"
 	contractsfoundation "github.com/goravel/framework/contracts/foundation"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -39,21 +42,30 @@ type Runtime struct {
 
 var _ packagecontracts.Runtime = (*Runtime)(nil)
 var _ packagecontracts.ApplicationRuntime = (*Runtime)(nil)
+var _ packagecontracts.TransactionRuntime = (*Runtime)(nil)
 
 func NewRuntime(app contractsfoundation.Application) (*Runtime, error) {
 	if app == nil {
 		return nil, errors.New("goravel-dbos: application is required")
 	}
 	config := app.MakeConfig()
-	driver := ""
+	var native contractsdatabase.Config
 	if config != nil && config.GetBool("dbos.enabled", true) && strings.ToLower(strings.TrimSpace(config.GetString("dbos.role", RoleProducer))) != RoleDisabled {
-		ormService := app.MakeOrm()
-		if ormService == nil {
-			return nil, errors.New("goravel-dbos: Goravel ORM service is unavailable")
+		via, ok := config.Get("database.connections." + config.GetString("database.default") + ".via").(func() (contractsdriver.Driver, error))
+		if !ok {
+			return nil, errors.New("goravel-dbos: native database driver is unavailable")
 		}
-		driver = ormService.Connection(config.GetString("database.default")).Config().Driver
+		driver, err := via()
+		if err != nil || driver == nil {
+			return nil, errors.New("goravel-dbos: cannot resolve native database driver")
+		}
+		pool := driver.Pool()
+		if len(pool.Writers) != 1 {
+			return nil, errors.New("goravel-dbos: database.default must have exactly one writer")
+		}
+		native = pool.Writers[0]
 	}
-	cfg, err := loadConfig(config, driver)
+	cfg, err := loadConfig(config, native)
 	if err != nil {
 		return nil, err
 	}
@@ -75,6 +87,21 @@ func (r *Runtime) ApplicationVersion() string { return r.config.ApplicationVersi
 func (r *Runtime) DatabaseConnection() string { return r.config.DatabaseConnection }
 func (r *Runtime) DatabaseDriver() string     { return r.config.DatabaseDriver }
 func (r *Runtime) DatabaseSchema() string     { return r.config.DatabaseSchema }
+
+// TransactionDB returns the Goravel writer pool used to verify transaction ownership.
+func (r *Runtime) TransactionDB() (*sql.DB, error) {
+	if r.config.Role == RoleDisabled {
+		return nil, ErrDisabled
+	}
+	if r.app == nil {
+		return nil, errors.New("goravel-dbos: Goravel ORM service is unavailable")
+	}
+	ormService := r.app.MakeOrm()
+	if ormService == nil {
+		return nil, errors.New("goravel-dbos: Goravel ORM service is unavailable")
+	}
+	return ormService.Connection(r.config.DatabaseConnection).DB()
+}
 
 // Prepare initializes the DBOS system database and applies SDK-owned schema
 // migrations without launching workflow execution. It is safe to call more
@@ -305,7 +332,7 @@ func (r *Runtime) databaseInputs() (string, *pgxpool.Pool, error) {
 	}
 	poolConfig, err := pgxpool.ParseConfig(r.config.DatabaseURL)
 	if err != nil {
-		return "", nil, fmt.Errorf("goravel-dbos: parse native PostgreSQL connection: %w", err)
+		return "", nil, errors.New("goravel-dbos: invalid native PostgreSQL connection")
 	}
 	poolConfig.MaxConns = r.config.PoolMaxConns
 	poolConfig.MinConns = r.config.PoolMinConns

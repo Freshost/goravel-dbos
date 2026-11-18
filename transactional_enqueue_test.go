@@ -8,6 +8,7 @@ import (
 	"time"
 
 	dbossdk "github.com/dbos-inc/dbos-transact-golang/dbos"
+	mocksorm "github.com/goravel/framework/mocks/database/orm"
 	"github.com/stretchr/testify/require"
 
 	packagecontracts "github.com/freshost/goravel-dbos/contracts"
@@ -46,13 +47,17 @@ type fakeTransactionScanner struct {
 func (f *fakeTransactionScanner) InTransaction() bool { return f.active }
 func (f *fakeTransactionScanner) Driver() string      { return f.driver }
 func (f *fakeTransactionScanner) ScanRaw(query string, destination any, values ...any) error {
-	f.query = query
-	f.values = values
+	if !strings.Contains(query, "SELECT name, queue_name") {
+		f.query = query
+		f.values = values
+	}
 	if f.err != nil {
 		return f.err
 	}
 	value := reflect.ValueOf(destination).Elem()
-	value.FieldByName("WorkflowID").SetString(f.id)
+	if field := value.FieldByName("WorkflowID"); field.IsValid() {
+		field.SetString(f.id)
+	}
 	if field := value.FieldByName("WorkflowName"); field.IsValid() {
 		field.SetString(f.workflowName)
 		value.FieldByName("QueueName").SetString(f.queueName)
@@ -75,7 +80,7 @@ func (f *fakeTransactionScanner) ExecRaw(query string, values ...any) (int64, er
 
 func TestEnqueueWithTransactionScannerBuildsDBOSV1Call(t *testing.T) {
 	runtime := fakeRuntime{version: "2026.08.1", schema: `tenant"dbos`}
-	tx := &fakeTransactionScanner{active: true, driver: "postgres", id: "invoice:123"}
+	tx := &fakeTransactionScanner{active: true, driver: "postgres", id: "invoice:123", workflowName: "billing.invoice_paid.v1", queueName: "billing"}
 	definition := Define[map[string]string, struct{}]("billing.invoice_paid.v1", "billing")
 
 	id, err := enqueueWithTransactionScanner(runtime, tx, definition, map[string]string{"invoiceId": "123"},
@@ -102,13 +107,22 @@ func TestEnqueueWithTransactionScannerBuildsDBOSV1Call(t *testing.T) {
 
 func TestTransactionEnqueueGeneratesWorkflowID(t *testing.T) {
 	runtime := fakeRuntime{version: "dev", schema: "dbos"}
-	tx := &fakeTransactionScanner{active: true, driver: "postgres"}
+	tx := &fakeTransactionScanner{active: true, driver: "postgres", workflowName: "example.v1", queueName: "example"}
 	tx.id = "generated-by-package"
 	definition := Define[string, struct{}]("example.v1", "example")
 	id, err := enqueueWithTransactionScanner(runtime, tx, definition, "input")
 	require.NoError(t, err)
 	require.Equal(t, "generated-by-package", id)
 	require.NotEmpty(t, tx.values[5])
+}
+
+func TestPostgresTransactionEnqueueRejectsWorkflowIDCollision(t *testing.T) {
+	for _, existing := range []struct{ name, queue string }{{"other.v1", "example"}, {"example.v1", "other"}} {
+		tx := &fakeTransactionScanner{active: true, driver: "postgres", id: "shared-id", workflowName: existing.name, queueName: existing.queue}
+		_, err := enqueueWithTransactionScanner(fakeRuntime{schema: "dbos"}, tx,
+			Define[string, string]("example.v1", "example"), "input", WithTransactionWorkflowID("shared-id"))
+		require.ErrorContains(t, err, "different workflow or queue")
+	}
 }
 
 func TestTransactionEnqueueFailsClosed(t *testing.T) {
@@ -137,6 +151,13 @@ func TestTransactionEnqueueFailsClosed(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.NotEmpty(t, id)
+}
+
+func TestPublicTransactionalEnqueueRequiresWriterIdentity(t *testing.T) {
+	tx := mocksorm.NewQuery(t)
+	tx.EXPECT().InTransaction().Return(true).Once()
+	_, err := EnqueueInTransaction(fakeRuntime{}, tx, Define[string, string]("example.v1", "example"), "private")
+	require.ErrorContains(t, err, "TransactionDB")
 }
 
 func TestPostgresTransactionEnqueueRequiresApplicationIdentity(t *testing.T) {
