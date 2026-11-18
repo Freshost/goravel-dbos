@@ -48,15 +48,6 @@ jobs:
           go mod tidy
           git diff --exit-code -- go.mod go.sum
 
-      - name: Upload CI-resolved modules
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: resolved-modules
-          path: |
-            go.mod
-            go.sum
-
       - name: Build DBOS 1.0 upgrade fixture
         working-directory: testdata/upgrade
         run: go build -mod=readonly -o "$GORAVEL_DBOS_V1_FIXTURE" .

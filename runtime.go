@@ -15,7 +15,6 @@ import (
 	contractsdriver "github.com/goravel/framework/contracts/database/driver"
 	contractsfoundation "github.com/goravel/framework/contracts/foundation"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"gorm.io/plugin/dbresolver"
 
 	packagecontracts "github.com/freshost/goravel-dbos/contracts"
 )
@@ -101,11 +100,7 @@ func (r *Runtime) TransactionDB() (*sql.DB, error) {
 	if ormService == nil {
 		return nil, errors.New("goravel-dbos: Goravel ORM service is unavailable")
 	}
-	db, err := privateGormQuery(ormService.Connection(r.config.DatabaseConnection).Query())
-	if err != nil {
-		return nil, err
-	}
-	return db.Clauses(dbresolver.Write).DB()
+	return ormService.Connection(r.config.DatabaseConnection).DB()
 }
 
 // Prepare initializes the DBOS system database and applies SDK-owned schema
