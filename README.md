@@ -245,5 +245,5 @@ Use native DBOS steps, queued child workflows and durable messages for
 sequential/parallel agent execution and human input. Graph definitions and
 product behavior belong to the consuming platform. See
 [application-owned workflows](docs/workflows.md) for composition and recovery
-boundaries, and [upgrading to 0.2](docs/upgrading.md) before updating an existing
+boundaries, and [upgrade instructions](docs/upgrading.md) before updating an existing
 application.

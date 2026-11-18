@@ -8,6 +8,8 @@ While the package is pre-1.0, minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-18
+
 ### Fixed
 
 - Keep transactional workflow inputs out of Goravel SQL logs and malformed

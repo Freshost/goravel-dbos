@@ -1,6 +1,6 @@
-# Upgrading to goravel-dbos 0.2
+# Upgrading goravel-dbos
 
-This release updates DBOS Go from 1.0.0 to
+The 0.2 release updates DBOS Go from 1.0.0 to
 [1.8.0](https://github.com/dbos-inc/dbos-transact-golang/releases/tag/v1.8.0),
 the latest stable release checked on 2026-11-10. Go 1.25 and Goravel 1.18 remain
 the supported baseline. PostgreSQL remains the only production-supported backend;
@@ -62,7 +62,7 @@ application name. Use the raw SDK Client explicitly for intentional routing to
 another application. Workflow registration, application migrations and graph
 definitions stay in the consuming application.
 
-## Transaction safety fixes
+## Transaction safety in 0.3
 
 Custom runtimes using `EnqueueInTransaction` must also implement
 `contracts.TransactionRuntime` by returning the native Goravel writer's
