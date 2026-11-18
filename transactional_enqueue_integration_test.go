@@ -85,6 +85,16 @@ type pgxTransactionScanner struct {
 func (s pgxTransactionScanner) InTransaction() bool { return true }
 func (s pgxTransactionScanner) Driver() string      { return "postgres" }
 func (s pgxTransactionScanner) ScanRaw(query string, destination any, values ...any) error {
+	if strings.Contains(query, "SELECT name, queue_name") {
+		var name, queue string
+		if err := s.tx.QueryRow(s.ctx, positionalPostgresQuery(query), values...).Scan(&name, &queue); err != nil {
+			return err
+		}
+		value := reflect.ValueOf(destination).Elem()
+		value.FieldByName("WorkflowName").SetString(name)
+		value.FieldByName("QueueName").SetString(queue)
+		return nil
+	}
 	var workflowID string
 	if err := s.tx.QueryRow(s.ctx, positionalPostgresQuery(query), values...).Scan(&workflowID); err != nil {
 		return err
@@ -163,6 +173,17 @@ func TestPostgresTransactionalEnqueueCommitAndRollback(t *testing.T) {
 	require.Equal(t, "integration-v1", status.ApplicationVersion)
 	require.Equal(t, "goravel-dbos-integration", status.ApplicationName)
 	require.Equal(t, "integration", status.QueueName)
+	for _, collision := range []Workflow[map[string]string, struct{}]{
+		Define[map[string]string, struct{}]("other.v1", definition.Queue()),
+		Define[map[string]string, struct{}](definition.Name(), "other"),
+	} {
+		tx, err := connection.Begin(ctx)
+		require.NoError(t, err)
+		_, err = enqueueWithTransactionScanner(runtime, pgxTransactionScanner{ctx: ctx, tx: tx}, collision,
+			map[string]string{"invoice_id": "456"}, WithTransactionWorkflowID(committedID))
+		require.ErrorContains(t, err, "different workflow or queue")
+		require.NoError(t, tx.Rollback(ctx))
+	}
 
 	firstRegistry := newRegistry(client)
 	require.NoError(t, firstRegistry.Schedule(dbossdk.ScheduleSpec{
@@ -279,6 +300,7 @@ func TestPostgresTransactionalEnqueueThroughGoravelORM(t *testing.T) {
 		nil,
 		nil,
 	)
+	runtimeApp.EXPECT().MakeOrm().Return(ormService).Maybe()
 	frameworkfoundation.NewApplication().Instance(binding.Orm, ormService)
 
 	definition := Define[map[string]string, struct{}]("integration.goravel-orm.v1", "integration")

@@ -1,6 +1,10 @@
 package contracts
 
-import dbossdk "github.com/dbos-inc/dbos-transact-golang/dbos"
+import (
+	"database/sql"
+
+	dbossdk "github.com/dbos-inc/dbos-transact-golang/dbos"
+)
 
 // Runtime is the narrow consumer-facing DBOS integration contract. Application
 // services normally depend on this interface or on an even narrower local
@@ -20,4 +24,11 @@ type Runtime interface {
 type ApplicationRuntime interface {
 	Runtime
 	ApplicationName() string
+}
+
+// TransactionRuntime supplies the native Goravel writer pool. Transaction-bound
+// enqueue rejects transactions from any other pool before issuing SQL.
+type TransactionRuntime interface {
+	Runtime
+	TransactionDB() (*sql.DB, error)
 }

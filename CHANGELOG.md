@@ -8,6 +8,23 @@ While the package is pre-1.0, minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep transactional workflow inputs out of Goravel SQL logs and malformed
+  database connection strings out of configuration errors.
+- Derive DBOS connections from the resolved native writer and reject connections
+  with multiple writers, transactions from another writer pool and workflow ID
+  collisions across workflows or queues.
+- Reject SQLite memory URI variants, including shared-cache and encoded forms.
+
+### Added
+
+- Additive `contracts.TransactionRuntime` and `Runtime.TransactionDB` for
+  transaction ownership checks; custom transactional runtimes must supply their
+  Goravel writer pool.
+- Real Goravel/DBOS SQLite relay coverage for migrations, commit, rollback,
+  claiming, retries and acknowledgement across both SQLite implementations.
+
 ## [0.2.0] - 2026-11-10
 
 ### Changed

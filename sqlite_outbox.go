@@ -164,9 +164,12 @@ func (r *Runtime) runSQLiteRelay(ctx context.Context, done chan<- struct{}, clie
 
 func (r *Runtime) relaySQLiteOnce(ctx context.Context, client dbossdk.Client, workerID string) (bool, error) {
 	now := time.Now()
-	query := r.app.MakeOrm().Connection(r.config.DatabaseConnection).WithContext(ctx).Query()
+	query, err := privateGormQuery(r.app.MakeOrm().Connection(r.config.DatabaseConnection).WithContext(ctx).Query())
+	if err != nil {
+		return false, err
+	}
 	var row sqliteOutboxRow
-	err := query.Raw(`UPDATE goravel_dbos_outbox
+	err = query.Raw(`UPDATE goravel_dbos_outbox
 		SET locked_by = ?, locked_until_ms = ?, attempts = attempts + 1
 		WHERE workflow_id = (
 			SELECT workflow_id FROM goravel_dbos_outbox
@@ -176,18 +179,18 @@ func (r *Runtime) relaySQLiteOnce(ctx context.Context, client dbossdk.Client, wo
 		)
 		AND delivered_at_ms IS NULL AND (locked_until_ms IS NULL OR locked_until_ms <= ?)
 		RETURNING workflow_id, workflow_name, queue_name, input_json, options_json, application_version, attempts`,
-		workerID, now.Add(r.config.SQLiteLeaseDuration).UnixMilli(), now.UnixMilli(), now.UnixMilli(), now.UnixMilli()).Scan(&row)
+		workerID, now.Add(r.config.SQLiteLeaseDuration).UnixMilli(), now.UnixMilli(), now.UnixMilli(), now.UnixMilli()).Scan(&row).Error
 	if err != nil {
 		return false, err
 	}
 	if row.WorkflowID == "" {
-		_, _ = query.Exec(`DELETE FROM goravel_dbos_outbox WHERE delivered_at_ms IS NOT NULL AND delivered_at_ms < ?`, now.Add(-r.config.SQLiteDeliveredRetention).UnixMilli())
+		query.Exec(`DELETE FROM goravel_dbos_outbox WHERE delivered_at_ms IS NOT NULL AND delivered_at_ms < ?`, now.Add(-r.config.SQLiteDeliveredRetention).UnixMilli())
 		return false, nil
 	}
 
 	err = deliverSQLiteOutboxRow(client, row, now)
 	if err == nil {
-		_, ackErr := query.Exec(`UPDATE goravel_dbos_outbox SET delivered_at_ms = ?, locked_by = NULL, locked_until_ms = NULL, last_error = NULL WHERE workflow_id = ? AND locked_by = ?`, now.UnixMilli(), row.WorkflowID, workerID)
+		ackErr := query.Exec(`UPDATE goravel_dbos_outbox SET delivered_at_ms = ?, locked_by = NULL, locked_until_ms = NULL, last_error = NULL WHERE workflow_id = ? AND locked_by = ?`, now.UnixMilli(), row.WorkflowID, workerID).Error
 		return true, ackErr
 	}
 	message := err.Error()
@@ -195,7 +198,7 @@ func (r *Runtime) relaySQLiteOnce(ctx context.Context, client dbossdk.Client, wo
 		message = message[:2048]
 	}
 	retryAt := now.Add(sqliteRetryDelay(row.Attempts, r.config.SQLiteRetryBase, r.config.SQLiteRetryMax))
-	_, releaseErr := query.Exec(`UPDATE goravel_dbos_outbox SET available_at_ms = ?, locked_by = NULL, locked_until_ms = NULL, last_error = ? WHERE workflow_id = ? AND locked_by = ?`, retryAt.UnixMilli(), message, row.WorkflowID, workerID)
+	releaseErr := query.Exec(`UPDATE goravel_dbos_outbox SET available_at_ms = ?, locked_by = NULL, locked_until_ms = NULL, last_error = ? WHERE workflow_id = ? AND locked_by = ?`, retryAt.UnixMilli(), message, row.WorkflowID, workerID).Error
 	return true, errors.Join(err, releaseErr)
 }
 

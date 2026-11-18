@@ -62,6 +62,20 @@ application name. Use the raw SDK Client explicitly for intentional routing to
 another application. Workflow registration, application migrations and graph
 definitions stay in the consuming application.
 
+## Transaction safety fixes
+
+Custom runtimes using `EnqueueInTransaction` must also implement
+`contracts.TransactionRuntime` by returning the native Goravel writer's
+`*sql.DB` from `TransactionDB()`. The package rejects transactions from another
+pool before executing SQL. Existing `contracts.Runtime` implementations remain
+source-compatible for ordinary enqueue.
+
+The native connection must have exactly one writer. DBOS now derives its
+connection from that resolved writer, including native `write` overrides.
+Reusing a workflow ID for a different workflow or queue returns an error; callers
+must return that error from the Goravel transaction callback to roll back their
+business writes.
+
 ## Release verification
 
 CI provisions isolated PostgreSQL 17 and runs formatting, module tidy, vet,
